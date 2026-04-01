@@ -135,7 +135,10 @@ def create_bot(
     async def _refresh_job(context):
         h.refresh_sheets_data()
 
-    app.job_queue.run_repeating(_refresh_job, interval=60, first=60)
+    if app.job_queue is not None:
+        app.job_queue.run_repeating(_refresh_job, interval=60, first=60)
+    else:
+        logger.warning("JobQueue not available — install python-telegram-bot[job-queue] for periodic refresh")
 
     app.add_handler(CommandHandler("insights", h.handle_insights_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, h.handle_message))

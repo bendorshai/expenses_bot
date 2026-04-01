@@ -134,6 +134,7 @@ class ExpenseHandlers:
                 expenses.append(parsed)
 
         if not expenses:
+            await self._answer_freetext_question(message)
             return
 
         await message.set_reaction(THUMBS_UP)
@@ -527,6 +528,21 @@ class ExpenseHandlers:
             "• מה הקטגוריה הכי יקרה בחודש האחרון?\n"
             "• כמה פעמים קניתי קפה השבוע?"
         )
+
+    async def _answer_freetext_question(self, message) -> None:
+        question = message.text.strip()
+        await message.set_reaction(THUMBS_UP)
+        try:
+            expenses = self.sheets.get_all_expenses()
+            csv_data = self._build_expenses_csv(expenses)
+            answer = self.categorizer.analyze_expenses(question, csv_data)
+            reply = answer if answer else "❌ לא הצלחתי לנתח את הנתונים"
+        except Exception:
+            logger.exception("Failed to analyze freetext question")
+            reply = "❌ שגיאה בניתוח הנתונים"
+        keyboard = make_insights_keyboard()
+        await message.reply_text(f"🔍 {question}\n\n{reply}", reply_markup=keyboard)
+        await message.set_reaction(OK_HAND)
 
     async def _handle_pending_question(self, message, context: ContextTypes.DEFAULT_TYPE) -> bool:
         pending = context.chat_data.get("pending_question")
