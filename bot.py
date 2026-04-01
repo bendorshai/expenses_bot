@@ -7,6 +7,7 @@ from telegram.ext import (
     Application,
     MessageHandler,
     CallbackQueryHandler,
+    CommandHandler,
     filters,
 )
 
@@ -18,7 +19,9 @@ from keyboards import (
     CALLBACK_PREFIX_EDIT, CALLBACK_PREFIX_EDIT_DESC, CALLBACK_PREFIX_EDIT_AMT,
     CALLBACK_PREFIX_EDIT_DATE, CALLBACK_PREFIX_EDIT_CAT, CALLBACK_PREFIX_EDIT_CUR,
     CALLBACK_PREFIX_CAT, CALLBACK_PREFIX_CUR_SET, CALLBACK_PREFIX_CUR_MENU,
-    CALLBACK_PREFIX_UPDATE, CALLBACK_PREFIX_DELETE, CALLBACK_PREFIX_BACK,
+    CALLBACK_PREFIX_UPDATE, CALLBACK_PREFIX_DELETE, CALLBACK_PREFIX_DIRECTIVE,
+    CALLBACK_PREFIX_INSIGHTS_SUMMARY, CALLBACK_PREFIX_INSIGHTS_ASK,
+    CALLBACK_PREFIX_BACK,
     make_edit_button,
 )
 from handlers import ExpenseHandlers
@@ -129,6 +132,12 @@ def create_bot(
         currency_lookup=currency_lookup,
     )
 
+    async def _refresh_job(context):
+        h.refresh_sheets_data()
+
+    app.job_queue.run_repeating(_refresh_job, interval=60, first=60)
+
+    app.add_handler(CommandHandler("insights", h.handle_insights_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, h.handle_message))
     app.add_handler(CallbackQueryHandler(h.handle_edit_button, pattern=f"^{CALLBACK_PREFIX_EDIT}\\d"))
     app.add_handler(CallbackQueryHandler(h.handle_edit_description, pattern=f"^{CALLBACK_PREFIX_EDIT_DESC}"))
@@ -140,6 +149,9 @@ def create_bot(
     app.add_handler(CallbackQueryHandler(h.handle_category_selection, pattern=f"^{CALLBACK_PREFIX_CAT}"))
     app.add_handler(CallbackQueryHandler(h.handle_currency_menu, pattern=f"^{CALLBACK_PREFIX_CUR_MENU}"))
     app.add_handler(CallbackQueryHandler(h.handle_currency_selection, pattern=f"^{CALLBACK_PREFIX_CUR_SET}"))
+    app.add_handler(CallbackQueryHandler(h.handle_directive, pattern=f"^{CALLBACK_PREFIX_DIRECTIVE}"))
+    app.add_handler(CallbackQueryHandler(h.handle_insights_summary, pattern=f"^{CALLBACK_PREFIX_INSIGHTS_SUMMARY}"))
+    app.add_handler(CallbackQueryHandler(h.handle_insights_ask, pattern=f"^{CALLBACK_PREFIX_INSIGHTS_ASK}"))
     app.add_handler(CallbackQueryHandler(h.handle_delete, pattern=f"^{CALLBACK_PREFIX_DELETE}"))
     app.add_handler(CallbackQueryHandler(h.handle_back, pattern=f"^{CALLBACK_PREFIX_BACK}"))
 

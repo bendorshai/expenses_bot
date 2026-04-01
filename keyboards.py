@@ -17,6 +17,9 @@ CALLBACK_PREFIX_CUR_MENU = "curm_"
 CALLBACK_PREFIX_UPDATE = "upd_"
 CALLBACK_PREFIX_DELETE = "del_"
 CALLBACK_PREFIX_READD = "readd_"
+CALLBACK_PREFIX_DIRECTIVE = "dir_"
+CALLBACK_PREFIX_INSIGHTS_SUMMARY = "isum_"
+CALLBACK_PREFIX_INSIGHTS_ASK = "iask_"
 CALLBACK_PREFIX_BACK = "back_"
 
 
@@ -34,7 +37,10 @@ def make_edit_menu_keyboard(row_number: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton("מטבע", callback_data=f"{CALLBACK_PREFIX_EDIT_CUR}{row_number}"),
             InlineKeyboardButton("תאריך", callback_data=f"{CALLBACK_PREFIX_EDIT_DATE}{row_number}"),
         ],
-        [InlineKeyboardButton("סיווג", callback_data=f"{CALLBACK_PREFIX_EDIT_CAT}{row_number}")],
+        [
+            InlineKeyboardButton("סיווג", callback_data=f"{CALLBACK_PREFIX_EDIT_CAT}{row_number}"),
+            InlineKeyboardButton("הנחיה לסיווג עתידי", callback_data=f"{CALLBACK_PREFIX_DIRECTIVE}{row_number}"),
+        ],
         [InlineKeyboardButton("מחיקה", callback_data=f"{CALLBACK_PREFIX_DELETE}{row_number}")],
         [InlineKeyboardButton("חזור", callback_data=f"{CALLBACK_PREFIX_BACK}")],
     ])
@@ -52,6 +58,13 @@ def make_currency_keyboard(row_number: int, currency_list: list[str]) -> InlineK
     for cur in currency_list:
         buttons.append([InlineKeyboardButton(cur, callback_data=f"{CALLBACK_PREFIX_CUR_SET}{row_number}:{cur}")])
     return InlineKeyboardMarkup(buttons)
+
+
+def make_insights_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 סיכום חודשי", callback_data=f"{CALLBACK_PREFIX_INSIGHTS_SUMMARY}0")],
+        [InlineKeyboardButton("🔍 שאל שאלה על ההוצאות", callback_data=f"{CALLBACK_PREFIX_INSIGHTS_ASK}0")],
+    ])
 
 
 def base_text(text: str) -> str:

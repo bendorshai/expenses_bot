@@ -169,6 +169,36 @@ class SheetsClient:
         values = ws.col_values(1)
         return [v.strip() for v in values if v.strip()]
 
+    def append_directive(self, directive: str) -> None:
+        """Append a new directive to the directives tab."""
+        spreadsheet = self._get_spreadsheet()
+        try:
+            ws = spreadsheet.worksheet(self.directives_tab_name)
+        except gspread.WorksheetNotFound:
+            ws = spreadsheet.add_worksheet(title=self.directives_tab_name, rows=100, cols=1)
+        ws.append_row([directive], value_input_option="USER_ENTERED")
+
+    def get_all_expenses(self) -> list[dict[str, str]]:
+        """Read all expense rows (skipping header) as list of {col_name: value}."""
+        ws = self._get_worksheet()
+        all_rows = ws.get_all_values()
+        if len(all_rows) <= 1:
+            return []
+
+        col_index_to_name = {
+            _col_letter_to_index(letter): name
+            for letter, name in self.table_columns.items()
+        }
+        expenses = []
+        for row in all_rows[1:]:
+            entry = {}
+            for idx, val in enumerate(row):
+                if idx in col_index_to_name:
+                    entry[col_index_to_name[idx]] = val
+            if entry.get("תיאור") or entry.get("חובה"):
+                expenses.append(entry)
+        return expenses
+
     def get_currencies(self) -> list[str]:
         """Read all currency names from column A of the currencies tab.
         First row is the default currency."""

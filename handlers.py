@@ -1,22 +1,26 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
+from collections import defaultdict
+from datetime import date, datetime
 
 from telegram import Update, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from sheets import SheetsClient
 from categorizer import Categorizer
-from parsing import parse_date_token, detect_mode_change, parse_expense_line
+from parsing import parse_date_token, detect_mode_change, parse_expense_line, build_currency_lookup
 from keyboards import (
     THUMBS_UP, OK_HAND,
     CALLBACK_PREFIX_EDIT, CALLBACK_PREFIX_EDIT_DESC, CALLBACK_PREFIX_EDIT_AMT,
     CALLBACK_PREFIX_EDIT_DATE, CALLBACK_PREFIX_EDIT_CAT, CALLBACK_PREFIX_EDIT_CUR,
     CALLBACK_PREFIX_CAT, CALLBACK_PREFIX_CUR_SET, CALLBACK_PREFIX_CUR_MENU,
-    CALLBACK_PREFIX_UPDATE, CALLBACK_PREFIX_DELETE, CALLBACK_PREFIX_BACK,
+    CALLBACK_PREFIX_UPDATE, CALLBACK_PREFIX_DELETE, CALLBACK_PREFIX_DIRECTIVE,
+    CALLBACK_PREFIX_INSIGHTS_SUMMARY, CALLBACK_PREFIX_INSIGHTS_ASK,
+    CALLBACK_PREFIX_BACK,
     make_edit_button, make_edit_menu_keyboard,
-    make_categories_keyboard, make_currency_keyboard, base_text,
+    make_categories_keyboard, make_currency_keyboard, make_insights_keyboard,
+    base_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,6 +42,23 @@ class ExpenseHandlers:
         self.currency_list = currency_list
         self.default_currency = default_currency
         self.currency_lookup = currency_lookup
+        self._categories: list[str] = sheets_client.get_categories()
+        self._directives: list[str] = sheets_client.get_directives()
+
+    def refresh_sheets_data(self) -> None:
+        """Re-fetch categories, directives, and currencies from sheets."""
+        try:
+            self._categories = self.sheets.get_categories()
+            self._directives = self.sheets.get_directives()
+            new_currencies = self.sheets.get_currencies()
+            if new_currencies:
+                self.currency_list = new_currencies
+                self.default_currency = new_currencies[0]
+                self.currency_lookup = build_currency_lookup(new_currencies)
+            logger.debug("Refreshed sheets data: %d categories, %d directives, %d currencies",
+                         len(self._categories), len(self._directives), len(self.currency_list))
+        except Exception:
+            logger.exception("Failed to refresh sheets data")
 
     # ------------------------------------------------------------------
     # Helpers
@@ -99,6 +120,9 @@ class ExpenseHandlers:
             await message.set_reaction(OK_HAND)
             return
 
+        if await self._handle_pending_question(message, context):
+            return
+
         if await self._handle_pending_edit(message, context):
             return
 
@@ -115,8 +139,8 @@ class ExpenseHandlers:
         await message.set_reaction(THUMBS_UP)
 
         user_mode_currency = self._get_user_currency(context, user_id, self.default_currency)
-        categories = self.sheets.get_categories()
-        directives = self.sheets.get_directives()
+        categories = self._categories
+        directives = self._directives
 
         results = []
         all_buttons: list[list] = []
@@ -180,6 +204,15 @@ class ExpenseHandlers:
                     status = f"✓ תאריך עודכן: {parsed.strftime('%d/%m/%Y')}"
                 else:
                     status = "❌ תאריך לא תקין"
+            elif edit_type == "directive":
+                feedback = message.text.strip()
+                directive = self.categorizer.craft_directive(feedback)
+                if directive:
+                    self.sheets.append_directive(directive)
+                    self._directives.append(directive)
+                    status = f"✓ הנחיה נשמרה: {directive}"
+                else:
+                    status = "❌ לא הצלחתי ליצור הנחיה"
         except ValueError:
             status = "❌ ערך לא תקין"
         except Exception:
@@ -276,7 +309,7 @@ class ExpenseHandlers:
         query = update.callback_query
         await query.answer()
         row_number = int(query.data.removeprefix(CALLBACK_PREFIX_EDIT_CAT))
-        categories = self.sheets.get_categories()
+        categories = self._categories
         if not categories:
             await query.edit_message_text("אין קטגוריות מוגדרות בגיליון")
             return
@@ -292,6 +325,26 @@ class ExpenseHandlers:
         base = base_text(query.message.text or "")
         await query.edit_message_text(f"{base}\n\nבחר מטבע:", reply_markup=keyboard)
 
+    async def handle_directive(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+        row_number = int(query.data.removeprefix(CALLBACK_PREFIX_DIRECTIVE))
+        context.chat_data["pending_edit"] = {
+            "type": "directive",
+            "row_number": row_number,
+            "bot_message_id": query.message.message_id,
+        }
+        base = base_text(query.message.text or "")
+
+        directives_display = ""
+        if self._directives:
+            numbered = "\n".join(f"  {i}. {d}" for i, d in enumerate(self._directives, 1))
+            directives_display = f"\n\n📋 הנחיות קיימות:\n{numbered}\n"
+
+        await query.edit_message_text(
+            f"{base}{directives_display}\n✏️ שלח הנחיה חדשה לסיווג (בטקסט חופשי):"
+        )
+
     # ------------------------------------------------------------------
     # Selection callbacks (category / currency)
     # ------------------------------------------------------------------
@@ -301,7 +354,7 @@ class ExpenseHandlers:
         await query.answer()
 
         row_number = int(query.data.removeprefix(CALLBACK_PREFIX_UPDATE))
-        categories = self.sheets.get_categories()
+        categories = self._categories
         if not categories:
             await query.edit_message_text("אין קטגוריות מוגדרות בגיליון")
             return
@@ -368,6 +421,147 @@ class ExpenseHandlers:
         except Exception:
             logger.exception("Failed to update currency for row %d", row_number)
             await query.edit_message_text("שגיאה בעדכון המטבע")
+
+    # ------------------------------------------------------------------
+    # Insights
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_expenses_csv(expenses: list[dict[str, str]]) -> str:
+        lines = ["תאריך,תיאור,סכום,סיווג,מטבע"]
+        for e in expenses:
+            d = e.get("תאריך", "")
+            desc = e.get("תיאור", "")
+            amt = e.get("חובה", "0")
+            cat = e.get("סיווג", "")
+            cur = e.get("מטבע", "")
+            lines.append(f"{d},{desc},{amt},{cat},{cur}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _build_monthly_summary(expenses: list[dict[str, str]]) -> str:
+        HEBREW_MONTHS = {
+            1: "ינואר", 2: "פברואר", 3: "מרץ", 4: "אפריל",
+            5: "מאי", 6: "יוני", 7: "יולי", 8: "אוגוסט",
+            9: "ספטמבר", 10: "אוקטובר", 11: "נובמבר", 12: "דצמבר",
+        }
+        months: dict[str, dict[str, dict[str, float]]] = defaultdict(
+            lambda: defaultdict(lambda: defaultdict(float))
+        )
+        month_totals: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+
+        for exp in expenses:
+            try:
+                amount = float(exp.get("חובה", "0") or "0")
+            except ValueError:
+                continue
+            if amount == 0:
+                continue
+            date_str = exp.get("תאריך", "")
+            category = exp.get("סיווג", "") or "ללא סיווג"
+            currency = exp.get("מטבע", "") or "שקל"
+            try:
+                d = datetime.strptime(date_str, "%d/%m/%Y")
+                sort_key = d.strftime("%Y-%m")
+            except ValueError:
+                continue
+            months[sort_key][currency][category] += amount
+            month_totals[sort_key][currency] += amount
+
+        if not months:
+            return "אין נתונים להצגה."
+
+        lines: list[str] = []
+        for sort_key in sorted(months.keys()):
+            year, mon = sort_key.split("-")
+            month_name = HEBREW_MONTHS.get(int(mon), mon)
+            lines.append(f"📅  {month_name} {year}")
+            lines.append("─" * 22)
+            for currency in sorted(months[sort_key]):
+                total = month_totals[sort_key][currency]
+                lines.append(f"  💰 {currency}: {total:,.1f}")
+                cats = months[sort_key][currency]
+                for cat, amt in sorted(cats.items(), key=lambda x: -x[1]):
+                    bar_len = int(amt / total * 10) if total else 0
+                    bar = "▓" * bar_len + "░" * (10 - bar_len)
+                    lines.append(f"      {bar} {cat}: {amt:,.1f}")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    async def handle_insights_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        message = update.effective_message
+        if not message or message.chat_id != self.chat_id:
+            return
+        keyboard = make_insights_keyboard()
+        await message.reply_text("📊 תובנות על ההוצאות", reply_markup=keyboard)
+
+    async def handle_insights_summary(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer("טוען נתונים...")
+        try:
+            expenses = self.sheets.get_all_expenses()
+            summary = self._build_monthly_summary(expenses)
+            header = f"📊 סיכום חודשי — {len(expenses)} הוצאות\n\n"
+            text = header + summary
+
+            keyboard = make_insights_keyboard()
+            if len(text) > 4096:
+                await query.edit_message_text(text[:4090] + "…", reply_markup=keyboard)
+            else:
+                await query.edit_message_text(text, reply_markup=keyboard)
+        except Exception:
+            logger.exception("Failed to build monthly summary")
+            await query.edit_message_text("❌ שגיאה בטעינת הנתונים")
+
+    async def handle_insights_ask(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+        context.chat_data["pending_question"] = {
+            "bot_message_id": query.message.message_id,
+        }
+        await query.edit_message_text(
+            "🔍 שאל שאלה על ההוצאות\n\n"
+            "שלח שאלה בטקסט חופשי, למשל:\n"
+            "• כמה הוצאתי על אוכל בחוץ בפברואר?\n"
+            "• מה הקטגוריה הכי יקרה בחודש האחרון?\n"
+            "• כמה פעמים קניתי קפה השבוע?"
+        )
+
+    async def _handle_pending_question(self, message, context: ContextTypes.DEFAULT_TYPE) -> bool:
+        pending = context.chat_data.get("pending_question")
+        if not pending:
+            return False
+
+        del context.chat_data["pending_question"]
+        bot_message_id = pending["bot_message_id"]
+        question = message.text.strip()
+
+        await message.set_reaction(THUMBS_UP)
+
+        try:
+            expenses = self.sheets.get_all_expenses()
+            csv_data = self._build_expenses_csv(expenses)
+            answer = self.categorizer.analyze_expenses(question, csv_data)
+            reply = answer if answer else "❌ לא הצלחתי לנתח את הנתונים"
+        except Exception:
+            logger.exception("Failed to analyze expenses")
+            reply = "❌ שגיאה בניתוח הנתונים"
+
+        keyboard = make_insights_keyboard()
+        try:
+            await context.bot.edit_message_text(
+                chat_id=message.chat_id,
+                message_id=bot_message_id,
+                text=f"🔍 {question}\n\n{reply}",
+                reply_markup=keyboard,
+            )
+        except Exception:
+            logger.debug("Could not edit bot message after question")
+            await message.reply_text(f"🔍 {question}\n\n{reply}", reply_markup=keyboard)
+
+        await message.set_reaction(OK_HAND)
+        return True
 
     # ------------------------------------------------------------------
     # Delete / Back
