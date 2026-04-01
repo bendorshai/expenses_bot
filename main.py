@@ -1,0 +1,68 @@
+import json
+import logging
+import sys
+from pathlib import Path
+
+from sheets import SheetsClient
+from categorizer import Categorizer
+from bot import create_bot, retroload
+from parsing import build_currency_lookup
+
+CONFIG_PATH = Path(__file__).parent / "config" / "config.json"
+
+logging.basicConfig(
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
+
+
+def load_config() -> dict:
+    if not CONFIG_PATH.exists():
+        logger.error("Config file not found: %s", CONFIG_PATH)
+        sys.exit(1)
+    with open(CONFIG_PATH, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def main():
+    cfg = load_config()
+
+    tg = cfg["telegram"]
+    gs = cfg["google_sheets"]
+    columns = cfg["table_columns"]
+    openai_cfg = cfg["openai"]
+
+    sheets_client = SheetsClient(
+        credentials_file=gs["credentials_file"],
+        sheet_id=gs["sheet_id"],
+        tab_name=gs["tab_name"],
+        table_columns=columns,
+        categories_tab_name=gs.get("categories_tab_name", "categories"),
+        directives_tab_name=gs.get("directives_tab_name", "directives"),
+        currencies_tab_name=gs.get("currencies_tab_name", "currencies"),
+    )
+    logger.info("Google Sheets client ready (sheet: %s, tab: %s)", gs["sheet_id"], gs["tab_name"])
+
+    currencies = sheets_client.get_currencies()
+    default_currency = currencies[0] if currencies else "שקל"
+    logger.info("Currencies loaded: %s (default: %s)", currencies, default_currency)
+
+    categorizer = Categorizer(api_key=openai_cfg["api_key"])
+    logger.info("GPT categorizer ready")
+
+    currency_lookup = build_currency_lookup(currencies)
+
+    app = create_bot(tg["bot_token"], tg["chat_id"], sheets_client, categorizer, currencies, default_currency)
+
+    async def post_init(application):
+        await retroload(application, tg["chat_id"], sheets_client, categorizer, currency_lookup, default_currency)
+
+    app.post_init = post_init
+
+    logger.info("Bot starting — listening for expenses in chat %s", tg["chat_id"])
+    app.run_polling(drop_pending_updates=True)
+
+
+if __name__ == "__main__":
+    main()
