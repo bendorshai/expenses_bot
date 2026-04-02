@@ -531,7 +531,11 @@ class ExpenseHandlers:
 
     async def _answer_freetext_question(self, message) -> None:
         question = message.text.strip()
-        await message.set_reaction(THUMBS_UP)
+        logger.info("Freetext question: %s", question)
+        try:
+            await message.set_reaction(THUMBS_UP)
+        except Exception:
+            logger.debug("Could not set thumbs-up reaction")
         try:
             expenses = self.sheets.get_all_expenses()
             csv_data = self._build_expenses_csv(expenses)
@@ -542,7 +546,10 @@ class ExpenseHandlers:
             reply = "❌ שגיאה בניתוח הנתונים"
         keyboard = make_insights_keyboard()
         await message.reply_text(f"🔍 {question}\n\n{reply}", reply_markup=keyboard)
-        await message.set_reaction(OK_HAND)
+        try:
+            await message.set_reaction(OK_HAND)
+        except Exception:
+            logger.debug("Could not set ok-hand reaction")
 
     async def _handle_pending_question(self, message, context: ContextTypes.DEFAULT_TYPE) -> bool:
         pending = context.chat_data.get("pending_question")
