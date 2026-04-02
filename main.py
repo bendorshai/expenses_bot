@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -60,8 +61,21 @@ def main():
 
     app.post_init = post_init
 
-    logger.info("Bot starting — listening for expenses in chat %s", tg["chat_id"])
-    app.run_polling(drop_pending_updates=True)
+    webhook_domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
+
+    if webhook_domain:
+        port = int(os.environ.get("PORT", 8443))
+        webhook_url = f"https://{webhook_domain}/webhook"
+        logger.info("Bot starting — webhook mode at %s (port %d), chat %s", webhook_url, port, tg["chat_id"])
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=port,
+            url_path="webhook",
+            webhook_url=webhook_url,
+        )
+    else:
+        logger.info("Bot starting — polling mode, chat %s", tg["chat_id"])
+        app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":

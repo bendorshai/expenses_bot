@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections import defaultdict
 from datetime import date, datetime
 
-from telegram import Update, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from sheets import SheetsClient
@@ -17,13 +18,32 @@ from keyboards import (
     CALLBACK_PREFIX_CAT, CALLBACK_PREFIX_CUR_SET, CALLBACK_PREFIX_CUR_MENU,
     CALLBACK_PREFIX_UPDATE, CALLBACK_PREFIX_DELETE, CALLBACK_PREFIX_DIRECTIVE,
     CALLBACK_PREFIX_INSIGHTS_SUMMARY, CALLBACK_PREFIX_INSIGHTS_ASK,
-    CALLBACK_PREFIX_BACK,
-    make_edit_button, make_edit_menu_keyboard,
+    CALLBACK_PREFIX_BACK, CALLBACK_PREFIX_BACK_EDIT, CALLBACK_PREFIX_MAIN_MENU,
+    make_edit_button, make_edit_menu_keyboard, make_cancel_keyboard,
     make_categories_keyboard, make_currency_keyboard, make_insights_keyboard,
-    base_text,
+    make_main_menu_keyboard, base_text,
 )
 
 logger = logging.getLogger(__name__)
+
+MAX_TG_LENGTH = 4096
+PENDING_STATE_TTL = 300  # 5 minutes
+
+
+async def _send_long_text(message, text: str, reply_markup=None) -> None:
+    """Send text that may exceed Telegram's 4096-char limit, splitting into chunks."""
+    if len(text) <= MAX_TG_LENGTH:
+        await message.reply_text(text, reply_markup=reply_markup)
+        return
+    while text:
+        if len(text) <= MAX_TG_LENGTH:
+            await message.reply_text(text, reply_markup=reply_markup)
+            break
+        split_at = text.rfind("\n", 0, MAX_TG_LENGTH)
+        if split_at <= 0:
+            split_at = MAX_TG_LENGTH
+        await message.reply_text(text[:split_at])
+        text = text[split_at:].lstrip("\n")
 
 
 class ExpenseHandlers:
@@ -174,10 +194,16 @@ class ExpenseHandlers:
         context.chat_data[f"buttons_{reply_msg.message_id}"] = all_buttons
         await message.set_reaction(OK_HAND)
 
+        self._schedule_welcome(context)
+
     async def _handle_pending_edit(self, message, context: ContextTypes.DEFAULT_TYPE) -> bool:
         """Process a pending inline-edit if one exists. Returns True if handled."""
         pending = context.chat_data.get("pending_edit")
         if not pending:
+            return False
+
+        if time.time() - pending.get("timestamp", 0) > PENDING_STATE_TTL:
+            del context.chat_data["pending_edit"]
             return False
 
         del context.chat_data["pending_edit"]
@@ -278,9 +304,12 @@ class ExpenseHandlers:
             "type": "description",
             "row_number": row_number,
             "bot_message_id": query.message.message_id,
+            "timestamp": time.time(),
         }
         base = base_text(query.message.text or "")
-        await query.edit_message_text(f"{base}\n\nהקלד תיאור חדש:")
+        await query.edit_message_text(
+            f"{base}\n\nהקלד תיאור חדש:", reply_markup=make_cancel_keyboard(row_number),
+        )
 
     async def handle_edit_amount(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -290,9 +319,12 @@ class ExpenseHandlers:
             "type": "amount",
             "row_number": row_number,
             "bot_message_id": query.message.message_id,
+            "timestamp": time.time(),
         }
         base = base_text(query.message.text or "")
-        await query.edit_message_text(f"{base}\n\nהקלד סכום חדש:")
+        await query.edit_message_text(
+            f"{base}\n\nהקלד סכום חדש:", reply_markup=make_cancel_keyboard(row_number),
+        )
 
     async def handle_edit_date(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -302,9 +334,13 @@ class ExpenseHandlers:
             "type": "date",
             "row_number": row_number,
             "bot_message_id": query.message.message_id,
+            "timestamp": time.time(),
         }
         base = base_text(query.message.text or "")
-        await query.edit_message_text(f"{base}\n\nהקלד תאריך (dd/mm/yyyy, אתמול, שלשום):")
+        await query.edit_message_text(
+            f"{base}\n\nהקלד תאריך (dd/mm/yyyy, אתמול, שלשום):",
+            reply_markup=make_cancel_keyboard(row_number),
+        )
 
     async def handle_edit_category(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -334,6 +370,7 @@ class ExpenseHandlers:
             "type": "directive",
             "row_number": row_number,
             "bot_message_id": query.message.message_id,
+            "timestamp": time.time(),
         }
         base = base_text(query.message.text or "")
 
@@ -343,7 +380,8 @@ class ExpenseHandlers:
             directives_display = f"\n\n📋 הנחיות קיימות:\n{numbered}\n"
 
         await query.edit_message_text(
-            f"{base}{directives_display}\n✏️ שלח הנחיה חדשה לסיווג (בטקסט חופשי):"
+            f"{base}{directives_display}\n✏️ שלח הנחיה חדשה לסיווג (בטקסט חופשי):",
+            reply_markup=make_cancel_keyboard(row_number),
         )
 
     # ------------------------------------------------------------------
@@ -507,8 +545,8 @@ class ExpenseHandlers:
             text = header + summary
 
             keyboard = make_insights_keyboard()
-            if len(text) > 4096:
-                await query.edit_message_text(text[:4090] + "…", reply_markup=keyboard)
+            if len(text) > MAX_TG_LENGTH:
+                await query.edit_message_text(text[:MAX_TG_LENGTH - 6] + "\n…", reply_markup=keyboard)
             else:
                 await query.edit_message_text(text, reply_markup=keyboard)
         except Exception:
@@ -520,13 +558,18 @@ class ExpenseHandlers:
         await query.answer()
         context.chat_data["pending_question"] = {
             "bot_message_id": query.message.message_id,
+            "timestamp": time.time(),
         }
+        cancel_keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("חזור לתפריט", callback_data=f"{CALLBACK_PREFIX_MAIN_MENU}home")],
+        ])
         await query.edit_message_text(
             "🔍 שאל שאלה על ההוצאות\n\n"
             "שלח שאלה בטקסט חופשי, למשל:\n"
             "• כמה הוצאתי על אוכל בחוץ בפברואר?\n"
             "• מה הקטגוריה הכי יקרה בחודש האחרון?\n"
-            "• כמה פעמים קניתי קפה השבוע?"
+            "• כמה פעמים קניתי קפה השבוע?",
+            reply_markup=cancel_keyboard,
         )
 
     async def _answer_freetext_question(self, message) -> None:
@@ -545,7 +588,14 @@ class ExpenseHandlers:
             logger.exception("Failed to analyze freetext question")
             reply = "❌ שגיאה בניתוח הנתונים"
         keyboard = make_insights_keyboard()
-        await message.reply_text(f"🔍 {question}\n\n{reply}", reply_markup=keyboard)
+        try:
+            await _send_long_text(message, f"🔍 {question}\n\n{reply}", reply_markup=keyboard)
+        except Exception:
+            logger.exception("Failed to send freetext reply")
+            try:
+                await message.reply_text("❌ שגיאה בשליחת התשובה", reply_markup=keyboard)
+            except Exception:
+                pass
         try:
             await message.set_reaction(OK_HAND)
         except Exception:
@@ -554,6 +604,10 @@ class ExpenseHandlers:
     async def _handle_pending_question(self, message, context: ContextTypes.DEFAULT_TYPE) -> bool:
         pending = context.chat_data.get("pending_question")
         if not pending:
+            return False
+
+        if time.time() - pending.get("timestamp", 0) > PENDING_STATE_TTL:
+            del context.chat_data["pending_question"]
             return False
 
         del context.chat_data["pending_question"]
@@ -572,18 +626,33 @@ class ExpenseHandlers:
             reply = "❌ שגיאה בניתוח הנתונים"
 
         keyboard = make_insights_keyboard()
+        full_text = f"🔍 {question}\n\n{reply}"
         try:
-            await context.bot.edit_message_text(
-                chat_id=message.chat_id,
-                message_id=bot_message_id,
-                text=f"🔍 {question}\n\n{reply}",
-                reply_markup=keyboard,
-            )
+            if len(full_text) <= MAX_TG_LENGTH:
+                await context.bot.edit_message_text(
+                    chat_id=message.chat_id,
+                    message_id=bot_message_id,
+                    text=full_text,
+                    reply_markup=keyboard,
+                )
+            else:
+                await context.bot.edit_message_text(
+                    chat_id=message.chat_id,
+                    message_id=bot_message_id,
+                    text="🔍 תשובה ארוכה — נשלחת בהודעה נפרדת",
+                )
+                await _send_long_text(message, full_text, reply_markup=keyboard)
         except Exception:
-            logger.debug("Could not edit bot message after question")
-            await message.reply_text(f"🔍 {question}\n\n{reply}", reply_markup=keyboard)
+            logger.exception("Could not send pending question reply")
+            try:
+                await _send_long_text(message, full_text, reply_markup=keyboard)
+            except Exception:
+                pass
 
-        await message.set_reaction(OK_HAND)
+        try:
+            await message.set_reaction(OK_HAND)
+        except Exception:
+            pass
         return True
 
     # ------------------------------------------------------------------
@@ -610,3 +679,97 @@ class ExpenseHandlers:
         keyboard = InlineKeyboardMarkup(stored_buttons) if stored_buttons else None
         base = base_text(query.message.text or "")
         await query.edit_message_text(base, reply_markup=keyboard)
+
+    async def handle_back_to_edit(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Return to the edit menu from category/currency grids or cancel a pending text input."""
+        query = update.callback_query
+        await query.answer()
+        row_number = int(query.data.removeprefix(CALLBACK_PREFIX_BACK_EDIT))
+
+        context.chat_data.pop("pending_edit", None)
+
+        editing = context.chat_data.get(f"editing_{query.message.message_id}", {})
+        description = editing.get("description", "")
+        base = editing.get("base_text", base_text(query.message.text or ""))
+
+        keyboard = make_edit_menu_keyboard(row_number)
+        await query.edit_message_text(f"{base}\n\nעריכה: {description}", reply_markup=keyboard)
+
+    # ------------------------------------------------------------------
+    # Main menu / Welcome
+    # ------------------------------------------------------------------
+
+    WELCOME_TEXT = (
+        "שלום! 👋\n"
+        "להוספת הוצאות, פשוט שלח הודעה, למשל: חלב 15\n"
+        "או בחר אחת מהאפשרויות:"
+    )
+
+    async def _send_welcome(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Send the welcome / main-menu message to the configured chat."""
+        keyboard = make_main_menu_keyboard()
+        await context.bot.send_message(
+            chat_id=self.chat_id, text=self.WELCOME_TEXT, reply_markup=keyboard,
+        )
+
+    async def handle_start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        message = update.effective_message
+        if not message or message.chat_id != self.chat_id:
+            return
+        keyboard = make_main_menu_keyboard()
+        await message.reply_text(self.WELCOME_TEXT, reply_markup=keyboard)
+
+    async def handle_main_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+        action = query.data.removeprefix(CALLBACK_PREFIX_MAIN_MENU)
+
+        context.chat_data.pop("pending_question", None)
+
+        if action == "home":
+            keyboard = make_main_menu_keyboard()
+            await query.edit_message_text(self.WELCOME_TEXT, reply_markup=keyboard)
+
+        elif action == "currency":
+            user_id = query.from_user.id if query.from_user else 0
+            current = self._get_user_currency(context, user_id, self.default_currency)
+            available = ", ".join(self.currency_list)
+            keyboard = make_main_menu_keyboard()
+            await query.edit_message_text(
+                f"💱 מצב מטבע נוכחי: {current}\n\n"
+                f"מטבעות זמינים: {available}\n\n"
+                "לשינוי מטבע, שלח: מצב <שם מטבע>",
+                reply_markup=keyboard,
+            )
+
+        elif action == "directives":
+            keyboard = make_main_menu_keyboard()
+            if self._directives:
+                numbered = "\n".join(f"  {i}. {d}" for i, d in enumerate(self._directives, 1))
+                text = f"📋 הנחיות סיווג קיימות:\n\n{numbered}"
+            else:
+                text = "📋 אין הנחיות סיווג כרגע.\nאפשר להוסיף דרך עריכת הוצאה."
+            await query.edit_message_text(text, reply_markup=keyboard)
+
+    # ------------------------------------------------------------------
+    # Idle welcome timer
+    # ------------------------------------------------------------------
+
+    def _schedule_welcome(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Cancel any pending welcome job and schedule a new one 60s from now."""
+        old_job = context.chat_data.get("welcome_job")
+        if old_job is not None:
+            old_job.schedule_removal()
+            context.chat_data.pop("welcome_job", None)
+
+        job_queue = context.application.job_queue
+        if job_queue is None:
+            return
+
+        job = job_queue.run_once(self._welcome_job_callback, when=60, chat_id=self.chat_id)
+        context.chat_data["welcome_job"] = job
+
+    async def _welcome_job_callback(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+        chat_data = context.application.chat_data.get(self.chat_id, {})
+        chat_data.pop("welcome_job", None)
+        await self._send_welcome(context)

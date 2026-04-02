@@ -21,6 +21,8 @@ CALLBACK_PREFIX_DIRECTIVE = "dir_"
 CALLBACK_PREFIX_INSIGHTS_SUMMARY = "isum_"
 CALLBACK_PREFIX_INSIGHTS_ASK = "iask_"
 CALLBACK_PREFIX_BACK = "back_"
+CALLBACK_PREFIX_BACK_EDIT = "bked_"
+CALLBACK_PREFIX_MAIN_MENU = "mmenu_"
 
 
 def make_edit_button(row_number: int, description: str) -> list[InlineKeyboardButton]:
@@ -46,10 +48,17 @@ def make_edit_menu_keyboard(row_number: int) -> InlineKeyboardMarkup:
     ])
 
 
+def make_cancel_keyboard(row_number: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("ביטול", callback_data=f"{CALLBACK_PREFIX_BACK_EDIT}{row_number}")],
+    ])
+
+
 def make_categories_keyboard(row_number: int, categories: list[str]) -> InlineKeyboardMarkup:
     buttons = []
     for cat in categories:
         buttons.append([InlineKeyboardButton(cat, callback_data=f"{CALLBACK_PREFIX_CAT}{row_number}:{cat}")])
+    buttons.append([InlineKeyboardButton("חזור", callback_data=f"{CALLBACK_PREFIX_BACK_EDIT}{row_number}")])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -57,6 +66,7 @@ def make_currency_keyboard(row_number: int, currency_list: list[str]) -> InlineK
     buttons = []
     for cur in currency_list:
         buttons.append([InlineKeyboardButton(cur, callback_data=f"{CALLBACK_PREFIX_CUR_SET}{row_number}:{cur}")])
+    buttons.append([InlineKeyboardButton("חזור", callback_data=f"{CALLBACK_PREFIX_BACK_EDIT}{row_number}")])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -64,6 +74,20 @@ def make_insights_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📊 סיכום חודשי", callback_data=f"{CALLBACK_PREFIX_INSIGHTS_SUMMARY}0")],
         [InlineKeyboardButton("🔍 שאל שאלה על ההוצאות", callback_data=f"{CALLBACK_PREFIX_INSIGHTS_ASK}0")],
+        [InlineKeyboardButton("חזור לתפריט", callback_data=f"{CALLBACK_PREFIX_MAIN_MENU}home")],
+    ])
+
+
+def make_main_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📊 סיכום חודשי", callback_data=f"{CALLBACK_PREFIX_INSIGHTS_SUMMARY}0"),
+            InlineKeyboardButton("🔍 שאל שאלה", callback_data=f"{CALLBACK_PREFIX_INSIGHTS_ASK}0"),
+        ],
+        [
+            InlineKeyboardButton("💱 מצב מטבע", callback_data=f"{CALLBACK_PREFIX_MAIN_MENU}currency"),
+            InlineKeyboardButton("📋 הנחיות סיווג", callback_data=f"{CALLBACK_PREFIX_MAIN_MENU}directives"),
+        ],
     ])
 
 
