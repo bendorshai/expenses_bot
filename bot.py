@@ -23,6 +23,7 @@ from keyboards import (
     CALLBACK_PREFIX_CAT, CALLBACK_PREFIX_CUR_SET, CALLBACK_PREFIX_CUR_MENU,
     CALLBACK_PREFIX_CUR_MODE,
     CALLBACK_PREFIX_UPDATE, CALLBACK_PREFIX_DELETE, CALLBACK_PREFIX_DIRECTIVE,
+    CALLBACK_PREFIX_SUGGEST_DIR,
     CALLBACK_PREFIX_INSIGHTS_SUMMARY, CALLBACK_PREFIX_INSIGHTS_ASK,
     CALLBACK_PREFIX_BACK, CALLBACK_PREFIX_BACK_EDIT, CALLBACK_PREFIX_MAIN_MENU,
     make_edit_button,
@@ -175,6 +176,7 @@ def create_bot(
     app.add_handler(CallbackQueryHandler(h.handle_currency_selection, pattern=f"^{CALLBACK_PREFIX_CUR_SET}"))
     app.add_handler(CallbackQueryHandler(h.handle_currency_mode_switch, pattern=f"^{CALLBACK_PREFIX_CUR_MODE}"))
     app.add_handler(CallbackQueryHandler(h.handle_directive, pattern=f"^{CALLBACK_PREFIX_DIRECTIVE}"))
+    app.add_handler(CallbackQueryHandler(h.handle_suggest_directive, pattern=f"^{CALLBACK_PREFIX_SUGGEST_DIR}"))
     app.add_handler(CallbackQueryHandler(h.handle_insights_summary, pattern=f"^{CALLBACK_PREFIX_INSIGHTS_SUMMARY}"))
     app.add_handler(CallbackQueryHandler(h.handle_insights_ask, pattern=f"^{CALLBACK_PREFIX_INSIGHTS_ASK}"))
     app.add_handler(CallbackQueryHandler(h.handle_delete, pattern=f"^{CALLBACK_PREFIX_DELETE}"))
