@@ -24,28 +24,22 @@ class Categorizer:
         categories_block = "\n".join(f"- {c}" for c in categories)
         directives_block = "\n".join(f"- {d}" for d in directives) if directives else "(אין הנחיות)"
 
-        hint_block = ""
-        if category_hint:
-            hint_block = (
-                f"\n⚠️ המשתמש ציין רמז מפורש לסיווג: \"{category_hint}\". "
-                "יש להתייחס לרמז זה כהנחיה חזקה מאוד — בחר את הקטגוריה הקרובה ביותר לרמז.\n"
-            )
-
         system_prompt = (
             "אתה מערכת סיווג הוצאות. תפקידך לסווג תיאור של הוצאה לאחת מהקטגוריות המוגדרות.\n\n"
             f"קטגוריות אפשריות:\n{categories_block}\n\n"
-            f"הנחיות סיווג:\n{directives_block}\n"
-            f"{hint_block}\n"
+            f"הנחיות סיווג:\n{directives_block}\n\n"
             "החזר אך ורק את שם הקטגוריה המתאימה, ללא הסבר או טקסט נוסף.\n"
             "אם אף קטגוריה לא מתאימה, החזר את המילה: אחר"
         )
+
+        user_content = category_hint if category_hint else description
 
         try:
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": description},
+                    {"role": "user", "content": user_content},
                 ],
                 temperature=0,
                 max_tokens=50,

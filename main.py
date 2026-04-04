@@ -9,7 +9,7 @@ from categorizer import Categorizer
 from bot import create_bot, retroload
 from parsing import build_currency_lookup
 
-VERSION = "0.0.8"
+VERSION = "0.0.9"
 CONFIG_PATH = Path(__file__).parent / "config" / "config.json"
 
 logging.basicConfig(
