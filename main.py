@@ -10,7 +10,7 @@ from storage import MongoStorage
 from bot import create_bot, retroload
 from parsing import build_currency_lookup
 
-VERSION = "0.1.4"
+VERSION = "0.1.5"
 CONFIG_PATH = Path(__file__).parent / "config" / "config.json"
 
 logging.basicConfig(
@@ -86,8 +86,9 @@ def main():
     async def post_init(application):
         saved_currencies = mongo_storage.get_all_user_currencies()
         if saved_currencies:
-            chat_data = application.chat_data.setdefault(tg["chat_id"], {})
-            chat_data["user_currencies"] = saved_currencies
+            if tg["chat_id"] not in application._chat_data:
+                application._chat_data[tg["chat_id"]] = {}
+            application._chat_data[tg["chat_id"]]["user_currencies"] = saved_currencies
             logger.info("Loaded %d user currency preferences from MongoDB", len(saved_currencies))
         await retroload(application, tg["chat_id"], sheets_client, categorizer, currency_lookup, default_currency)
         try:
