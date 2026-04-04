@@ -10,7 +10,7 @@ from storage import MongoStorage
 from bot import create_bot, retroload
 from parsing import build_currency_lookup
 
-VERSION = "0.1.2"
+VERSION = "0.1.3"
 CONFIG_PATH = Path(__file__).parent / "config" / "config.json"
 
 logging.basicConfig(
@@ -20,12 +20,34 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _parse_last_json(text: str) -> dict:
+    """Parse the last valid JSON object from text, handling Railway's duplicate-append bug."""
+    decoder = json.JSONDecoder()
+    text = text.strip()
+    result = None
+    pos = 0
+    while pos < len(text):
+        try:
+            obj, end = decoder.raw_decode(text, pos)
+            result = obj
+            pos = end
+        except json.JSONDecodeError:
+            pos += 1
+    if result is None:
+        raise json.JSONDecodeError("No valid JSON found", text, 0)
+    return result
+
+
 def load_config() -> dict:
+    env_json = os.environ.get("CONFIG2_JSON") or os.environ.get("CONFIG_JSON")
+    if env_json:
+        logger.info("Loading config from environment variable")
+        return _parse_last_json(env_json)
     if not CONFIG_PATH.exists():
         logger.error("Config file not found: %s", CONFIG_PATH)
         sys.exit(1)
     with open(CONFIG_PATH, encoding="utf-8") as f:
-        return json.load(f)
+        return _parse_last_json(f.read())
 
 
 def main():
