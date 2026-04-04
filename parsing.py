@@ -39,6 +39,19 @@ MODE_CHANGE_PATTERNS = [
     re.compile(r"מצב\s+(.+?)(?:\s+עכשיו)?$", re.IGNORECASE),
 ]
 
+EDIT_TRIGGER_WORDS = {
+    "לערוך", "עריכה", "ערוך", "תערוך",
+    "לתקן", "תיקון", "תקן", "תתקן", "לתקן",
+    "שנה", "לשנות", "שינוי", "תשנה",
+    "עדכן", "לעדכן", "עדכון", "תעדכן",
+    "fix", "edit", "change", "update",
+}
+
+
+def is_edit_request(text: str) -> bool:
+    """Return True if *text* looks like a request to edit an expense."""
+    return text.strip().lower() in {w.lower() for w in EDIT_TRIGGER_WORDS}
+
 
 def israel_today() -> date:
     return datetime.now(IL_TZ).date()

@@ -10,7 +10,7 @@ from telegram.ext import ContextTypes
 
 from sheets import SheetsClient
 from categorizer import Categorizer
-from parsing import parse_date_token, detect_mode_change, parse_expense_line, build_currency_lookup
+from parsing import parse_date_token, detect_mode_change, parse_expense_line, build_currency_lookup, is_edit_request
 from keyboards import (
     THUMBS_UP, OK_HAND,
     CALLBACK_PREFIX_EDIT, CALLBACK_PREFIX_EDIT_DESC, CALLBACK_PREFIX_EDIT_AMT,
@@ -140,6 +140,9 @@ class ExpenseHandlers:
             await message.set_reaction(OK_HAND)
             return
 
+        if await self._handle_reply_edit(message, context):
+            return
+
         if await self._handle_pending_question(message, context):
             return
 
@@ -196,6 +199,38 @@ class ExpenseHandlers:
 
         self._schedule_welcome(context)
 
+    async def _handle_reply_edit(self, message, context: ContextTypes.DEFAULT_TYPE) -> bool:
+        """If the user replies to a bot expense message with an edit trigger word, open the edit menu."""
+        if not message.reply_to_message or not is_edit_request(message.text):
+            return False
+
+        replied_msg = message.reply_to_message
+        stored_buttons = context.chat_data.get(f"buttons_{replied_msg.message_id}")
+        if not stored_buttons:
+            return False
+
+        if len(stored_buttons) == 1:
+            btn = stored_buttons[0][0]
+            row_number = int(btn.callback_data.removeprefix(CALLBACK_PREFIX_EDIT))
+            description = btn.text.split(" — ", 1)[-1] if " — " in btn.text else ""
+            base = base_text(replied_msg.text or "")
+            context.chat_data[f"editing_{replied_msg.message_id}"] = {
+                "row_number": row_number,
+                "description": description,
+                "base_text": base,
+            }
+            keyboard = make_edit_menu_keyboard(row_number)
+            await replied_msg.edit_text(f"{base}\n\nעריכה: {description}", reply_markup=keyboard)
+        else:
+            keyboard = InlineKeyboardMarkup(stored_buttons)
+            await replied_msg.edit_text(
+                base_text(replied_msg.text or "") + "\n\nבחר הוצאה לעריכה:",
+                reply_markup=keyboard,
+            )
+
+        await message.set_reaction(OK_HAND)
+        return True
+
     async def _handle_pending_edit(self, message, context: ContextTypes.DEFAULT_TYPE) -> bool:
         """Process a pending inline-edit if one exists. Returns True if handled."""
         pending = context.chat_data.get("pending_edit")
@@ -232,27 +267,30 @@ class ExpenseHandlers:
                 else:
                     status = "❌ תאריך לא תקין"
             elif edit_type == "directive":
-                feedback = message.text.strip()
-                directive = self.categorizer.craft_directive(feedback)
+                directive = message.text.strip()
                 if directive:
                     self.sheets.append_directive(directive)
                     self._directives.append(directive)
                     status = f"✓ הנחיה נשמרה: {directive}"
                 else:
-                    status = "❌ לא הצלחתי ליצור הנחיה"
+                    status = "❌ הנחיה ריקה"
         except ValueError:
             status = "❌ ערך לא תקין"
         except Exception:
             logger.exception("Failed to process edit")
             status = "❌ שגיאה בעדכון"
 
-        description = editing.get("description", "")
-        base = editing.get("base_text", "")
-        keyboard = make_edit_menu_keyboard(row_number)
-        text = base
-        if status:
-            text += f"\n\n{status}"
-        text += f"\n\nעריכה: {description}"
+        if pending.get("from_menu"):
+            keyboard = make_main_menu_keyboard()
+            text = status or "✓"
+        else:
+            description = editing.get("description", "")
+            base = editing.get("base_text", "")
+            keyboard = make_edit_menu_keyboard(row_number)
+            text = base
+            if status:
+                text += f"\n\n{status}"
+            text += f"\n\nעריכה: {description}"
 
         try:
             await context.bot.edit_message_text(
@@ -725,6 +763,7 @@ class ExpenseHandlers:
         action = query.data.removeprefix(CALLBACK_PREFIX_MAIN_MENU)
 
         context.chat_data.pop("pending_question", None)
+        context.chat_data.pop("pending_edit", None)
 
         if action == "home":
             keyboard = make_main_menu_keyboard()
@@ -743,13 +782,35 @@ class ExpenseHandlers:
             )
 
         elif action == "directives":
-            keyboard = make_main_menu_keyboard()
             if self._directives:
                 numbered = "\n".join(f"  {i}. {d}" for i, d in enumerate(self._directives, 1))
                 text = f"📋 הנחיות סיווג קיימות:\n\n{numbered}"
             else:
-                text = "📋 אין הנחיות סיווג כרגע.\nאפשר להוסיף דרך עריכת הוצאה."
+                text = "📋 אין הנחיות סיווג כרגע."
+            add_btn = InlineKeyboardButton("✏️ הוסף הנחיה", callback_data=f"{CALLBACK_PREFIX_MAIN_MENU}add_directive")
+            back_btn = InlineKeyboardButton("חזור", callback_data=f"{CALLBACK_PREFIX_MAIN_MENU}home")
+            keyboard = InlineKeyboardMarkup([[add_btn], [back_btn]])
             await query.edit_message_text(text, reply_markup=keyboard)
+
+        elif action == "add_directive":
+            context.chat_data["pending_edit"] = {
+                "type": "directive",
+                "row_number": 0,
+                "bot_message_id": query.message.message_id,
+                "from_menu": True,
+                "timestamp": time.time(),
+            }
+            directives_display = ""
+            if self._directives:
+                numbered = "\n".join(f"  {i}. {d}" for i, d in enumerate(self._directives, 1))
+                directives_display = f"\n\n📋 הנחיות קיימות:\n{numbered}\n"
+            cancel_keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("ביטול", callback_data=f"{CALLBACK_PREFIX_MAIN_MENU}directives")],
+            ])
+            await query.edit_message_text(
+                f"הנחיות סיווג{directives_display}\n✏️ שלח הנחיה חדשה לסיווג (בטקסט חופשי):",
+                reply_markup=cancel_keyboard,
+            )
 
     # ------------------------------------------------------------------
     # Idle welcome timer

@@ -88,6 +88,7 @@ def make_main_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("💱 מצב מטבע", callback_data=f"{CALLBACK_PREFIX_MAIN_MENU}currency"),
             InlineKeyboardButton("📋 הנחיות סיווג", callback_data=f"{CALLBACK_PREFIX_MAIN_MENU}directives"),
         ],
+        [InlineKeyboardButton("חזור", callback_data=f"{CALLBACK_PREFIX_MAIN_MENU}home")],
     ])
 
 
