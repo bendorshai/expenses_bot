@@ -14,12 +14,14 @@ from telegram.ext import (
 
 from sheets import SheetsClient
 from categorizer import Categorizer
+from storage import MongoStorage
 from parsing import build_currency_lookup, parse_expense_line
 from keyboards import (
     OK_HAND,
     CALLBACK_PREFIX_EDIT, CALLBACK_PREFIX_EDIT_DESC, CALLBACK_PREFIX_EDIT_AMT,
     CALLBACK_PREFIX_EDIT_DATE, CALLBACK_PREFIX_EDIT_CAT, CALLBACK_PREFIX_EDIT_CUR,
     CALLBACK_PREFIX_CAT, CALLBACK_PREFIX_CUR_SET, CALLBACK_PREFIX_CUR_MENU,
+    CALLBACK_PREFIX_CUR_MODE,
     CALLBACK_PREFIX_UPDATE, CALLBACK_PREFIX_DELETE, CALLBACK_PREFIX_DIRECTIVE,
     CALLBACK_PREFIX_INSIGHTS_SUMMARY, CALLBACK_PREFIX_INSIGHTS_ASK,
     CALLBACK_PREFIX_BACK, CALLBACK_PREFIX_BACK_EDIT, CALLBACK_PREFIX_MAIN_MENU,
@@ -135,6 +137,7 @@ def create_bot(
     categorizer: Categorizer,
     currency_list: list[str],
     default_currency: str,
+    mongo_storage: MongoStorage,
 ) -> Application:
     app = Application.builder().token(token).build()
     currency_lookup = build_currency_lookup(currency_list)
@@ -146,6 +149,7 @@ def create_bot(
         currency_list=currency_list,
         default_currency=default_currency,
         currency_lookup=currency_lookup,
+        mongo_storage=mongo_storage,
     )
 
     async def _refresh_job(context):
@@ -169,6 +173,7 @@ def create_bot(
     app.add_handler(CallbackQueryHandler(h.handle_category_selection, pattern=f"^{CALLBACK_PREFIX_CAT}"))
     app.add_handler(CallbackQueryHandler(h.handle_currency_menu, pattern=f"^{CALLBACK_PREFIX_CUR_MENU}"))
     app.add_handler(CallbackQueryHandler(h.handle_currency_selection, pattern=f"^{CALLBACK_PREFIX_CUR_SET}"))
+    app.add_handler(CallbackQueryHandler(h.handle_currency_mode_switch, pattern=f"^{CALLBACK_PREFIX_CUR_MODE}"))
     app.add_handler(CallbackQueryHandler(h.handle_directive, pattern=f"^{CALLBACK_PREFIX_DIRECTIVE}"))
     app.add_handler(CallbackQueryHandler(h.handle_insights_summary, pattern=f"^{CALLBACK_PREFIX_INSIGHTS_SUMMARY}"))
     app.add_handler(CallbackQueryHandler(h.handle_insights_ask, pattern=f"^{CALLBACK_PREFIX_INSIGHTS_ASK}"))

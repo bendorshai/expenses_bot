@@ -10,12 +10,14 @@ from telegram.ext import ContextTypes
 
 from sheets import SheetsClient
 from categorizer import Categorizer
+from storage import MongoStorage
 from parsing import parse_date_token, detect_mode_change, parse_expense_line, build_currency_lookup, is_edit_request, extract_category_hint
 from keyboards import (
     THUMBS_UP, OK_HAND,
     CALLBACK_PREFIX_EDIT, CALLBACK_PREFIX_EDIT_DESC, CALLBACK_PREFIX_EDIT_AMT,
     CALLBACK_PREFIX_EDIT_DATE, CALLBACK_PREFIX_EDIT_CAT, CALLBACK_PREFIX_EDIT_CUR,
     CALLBACK_PREFIX_CAT, CALLBACK_PREFIX_CUR_SET, CALLBACK_PREFIX_CUR_MENU,
+    CALLBACK_PREFIX_CUR_MODE,
     CALLBACK_PREFIX_UPDATE, CALLBACK_PREFIX_DELETE, CALLBACK_PREFIX_DIRECTIVE,
     CALLBACK_PREFIX_INSIGHTS_SUMMARY, CALLBACK_PREFIX_INSIGHTS_ASK,
     CALLBACK_PREFIX_BACK, CALLBACK_PREFIX_BACK_EDIT, CALLBACK_PREFIX_MAIN_MENU,
@@ -55,6 +57,7 @@ class ExpenseHandlers:
         currency_list: list[str],
         default_currency: str,
         currency_lookup: dict[str, str],
+        mongo_storage: MongoStorage,
     ):
         self.chat_id = chat_id
         self.sheets = sheets_client
@@ -62,6 +65,7 @@ class ExpenseHandlers:
         self.currency_list = currency_list
         self.default_currency = default_currency
         self.currency_lookup = currency_lookup
+        self.mongo = mongo_storage
         self._categories: list[str] = sheets_client.get_categories()
         self._directives: list[str] = sheets_client.get_directives()
 
@@ -89,10 +93,15 @@ class ExpenseHandlers:
         user_currencies = context.chat_data.setdefault("user_currencies", {})
         return user_currencies.get(user_id, default)
 
-    @staticmethod
-    def _set_user_currency(context: ContextTypes.DEFAULT_TYPE, user_id: int, currency: str) -> None:
+    def _set_user_currency(self, context: ContextTypes.DEFAULT_TYPE, user_id: int, currency: str) -> bool:
         user_currencies = context.chat_data.setdefault("user_currencies", {})
         user_currencies[user_id] = currency
+        try:
+            self.mongo.set_user_currency(user_id, currency)
+            return True
+        except Exception:
+            logger.exception("Failed to persist currency to MongoDB for user %d", user_id)
+            return False
 
     async def _process_single_expense(
         self,
@@ -136,8 +145,9 @@ class ExpenseHandlers:
 
         mode_currency = detect_mode_change(message.text, self.currency_lookup)
         if mode_currency:
-            self._set_user_currency(context, user_id, mode_currency)
-            await message.reply_text(f"מצב מטבע עודכן: {mode_currency}")
+            saved = self._set_user_currency(context, user_id, mode_currency)
+            db_status = "✅ נשמר במסד הנתונים" if saved else "⚠️ לא הצלחתי לשמור במסד הנתונים"
+            await message.reply_text(f"מצב מטבע עודכן: {mode_currency}\n{db_status}")
             await message.set_reaction(OK_HAND)
             return
 
@@ -493,14 +503,53 @@ class ExpenseHandlers:
             description = editing.get("description", "")
             base = editing.get("base_text", base_text(query.message.text or ""))
 
-            keyboard = make_edit_menu_keyboard(row_number)
-            await query.edit_message_text(
-                f"{base}\n\n✓ מטבע עודכן: {currency}\n\nעריכה: {description}",
-                reply_markup=keyboard,
-            )
+            user_id = query.from_user.id if query.from_user else 0
+            current_mode = self._get_user_currency(context, user_id, self.default_currency)
+
+            if currency != current_mode:
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton(
+                        f"כן, עבור למצב {currency}",
+                        callback_data=f"{CALLBACK_PREFIX_CUR_MODE}{row_number}:{currency}",
+                    )],
+                    [InlineKeyboardButton("לא, תודה", callback_data=f"{CALLBACK_PREFIX_BACK_EDIT}{row_number}")],
+                ])
+                await query.edit_message_text(
+                    f"{base}\n\n✓ מטבע עודכן: {currency}\n\nלעבור למצב {currency} לכל ההוצאות הבאות?",
+                    reply_markup=keyboard,
+                )
+            else:
+                keyboard = make_edit_menu_keyboard(row_number)
+                await query.edit_message_text(
+                    f"{base}\n\n✓ מטבע עודכן: {currency}\n\nעריכה: {description}",
+                    reply_markup=keyboard,
+                )
         except Exception:
             logger.exception("Failed to update currency for row %d", row_number)
             await query.edit_message_text("שגיאה בעדכון המטבע")
+
+    async def handle_currency_mode_switch(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+
+        payload = query.data.removeprefix(CALLBACK_PREFIX_CUR_MODE)
+        row_str, currency = payload.split(":", 1)
+        row_number = int(row_str)
+
+        user_id = query.from_user.id if query.from_user else 0
+        saved = self._set_user_currency(context, user_id, currency)
+        logger.info("Currency mode switched to '%s' for user %d", currency, user_id)
+
+        db_status = "✅ נשמר במסד הנתונים" if saved else "⚠️ לא הצלחתי לשמור במסד הנתונים"
+        editing = context.chat_data.get(f"editing_{query.message.message_id}", {})
+        description = editing.get("description", "")
+        base = editing.get("base_text", base_text(query.message.text or ""))
+
+        keyboard = make_edit_menu_keyboard(row_number)
+        await query.edit_message_text(
+            f"{base}\n\n✓ מצב מטבע עודכן: {currency}\n{db_status}\n\nעריכה: {description}",
+            reply_markup=keyboard,
+        )
 
     # ------------------------------------------------------------------
     # Insights

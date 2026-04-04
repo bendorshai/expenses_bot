@@ -6,10 +6,11 @@ from pathlib import Path
 
 from sheets import SheetsClient
 from categorizer import Categorizer
+from storage import MongoStorage
 from bot import create_bot, retroload
 from parsing import build_currency_lookup
 
-VERSION = "0.0.9"
+VERSION = "0.1.0"
 CONFIG_PATH = Path(__file__).parent / "config" / "config.json"
 
 logging.basicConfig(
@@ -53,11 +54,19 @@ def main():
     categorizer = Categorizer(api_key=openai_cfg["api_key"])
     logger.info("GPT categorizer ready")
 
+    mongo_cfg = cfg["mongodb"]
+    mongo_storage = MongoStorage(uri=mongo_cfg["uri"], db_name=mongo_cfg["db_name"])
+
     currency_lookup = build_currency_lookup(currencies)
 
-    app = create_bot(tg["bot_token"], tg["chat_id"], sheets_client, categorizer, currencies, default_currency)
+    app = create_bot(tg["bot_token"], tg["chat_id"], sheets_client, categorizer, currencies, default_currency, mongo_storage)
 
     async def post_init(application):
+        saved_currencies = mongo_storage.get_all_user_currencies()
+        if saved_currencies:
+            chat_data = application.chat_data.setdefault(tg["chat_id"], {})
+            chat_data["user_currencies"] = saved_currencies
+            logger.info("Loaded %d user currency preferences from MongoDB", len(saved_currencies))
         await retroload(application, tg["chat_id"], sheets_client, categorizer, currency_lookup, default_currency)
         try:
             await application.bot.send_message(
