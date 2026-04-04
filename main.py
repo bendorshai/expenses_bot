@@ -10,7 +10,7 @@ from storage import MongoStorage
 from bot import create_bot, retroload
 from parsing import build_currency_lookup
 
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 CONFIG_PATH = Path(__file__).parent / "config" / "config.json"
 
 logging.basicConfig(
