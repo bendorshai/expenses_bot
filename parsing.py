@@ -133,6 +133,21 @@ def _strip_date_token(text: str) -> tuple[str, date | None]:
     return text, None
 
 
+def extract_category_hint(description: str) -> tuple[str, str | None]:
+    """Extract a parenthesized category hint from the description.
+
+    Returns (clean_description, hint_or_None).
+    Example: "כרטיס טיסה (טיסות)" -> ("כרטיס טיסה", "טיסות")
+    """
+    m = re.search(r"\(([^)]+)\)\s*$", description)
+    if m:
+        hint = m.group(1).strip()
+        clean = description[:m.start()].strip()
+        if clean:
+            return clean, hint
+    return description, None
+
+
 def parse_expense_line(text: str, lookup: dict[str, str]) -> tuple[float, str, str | None, date | None] | None:
     """Parse a single expense line. Returns (amount, description, currency_or_None, date_or_None).
 

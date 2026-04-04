@@ -176,7 +176,7 @@ class SheetsClient:
             ws = spreadsheet.worksheet(self.directives_tab_name)
         except gspread.WorksheetNotFound:
             ws = spreadsheet.add_worksheet(title=self.directives_tab_name, rows=100, cols=1)
-        ws.append_row([directive], value_input_option="USER_ENTERED")
+        ws.append_row([directive], value_input_option="RAW")
 
     def get_all_expenses(self) -> list[dict[str, str]]:
         """Read all expense rows (skipping header) as list of {col_name: value}."""

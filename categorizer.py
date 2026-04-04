@@ -15,6 +15,7 @@ class Categorizer:
         description: str,
         categories: list[str],
         directives: list[str],
+        category_hint: str | None = None,
     ) -> str:
         if not categories:
             logger.warning("No categories defined — skipping categorization")
@@ -23,10 +24,18 @@ class Categorizer:
         categories_block = "\n".join(f"- {c}" for c in categories)
         directives_block = "\n".join(f"- {d}" for d in directives) if directives else "(אין הנחיות)"
 
+        hint_block = ""
+        if category_hint:
+            hint_block = (
+                f"\n⚠️ המשתמש ציין רמז מפורש לסיווג: \"{category_hint}\". "
+                "יש להתייחס לרמז זה כהנחיה חזקה מאוד — בחר את הקטגוריה הקרובה ביותר לרמז.\n"
+            )
+
         system_prompt = (
             "אתה מערכת סיווג הוצאות. תפקידך לסווג תיאור של הוצאה לאחת מהקטגוריות המוגדרות.\n\n"
             f"קטגוריות אפשריות:\n{categories_block}\n\n"
-            f"הנחיות סיווג:\n{directives_block}\n\n"
+            f"הנחיות סיווג:\n{directives_block}\n"
+            f"{hint_block}\n"
             "החזר אך ורק את שם הקטגוריה המתאימה, ללא הסבר או טקסט נוסף.\n"
             "אם אף קטגוריה לא מתאימה, החזר את המילה: אחר"
         )
@@ -44,29 +53,6 @@ class Categorizer:
             return response.choices[0].message.content.strip()
         except Exception:
             logger.exception("GPT categorization failed for: %s", description)
-            return ""
-
-    def craft_directive(self, feedback: str) -> str:
-        """Turn raw user feedback about categorization into a concise directive."""
-        system_prompt = (
-            "אתה עוזר ליצור הנחיות סיווג עבור מערכת מעקב הוצאות.\n"
-            "המשתמש יספק משוב על טעות בסיווג. צור הנחיה קצרה וברורה בעברית "
-            "שתנחה סיווגים עתידיים.\n"
-            "החזר אך ורק את הנחיית הסיווג, ללא הסבר או טקסט נוסף."
-        )
-        try:
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": feedback},
-                ],
-                temperature=0,
-                max_tokens=150,
-            )
-            return response.choices[0].message.content.strip()
-        except Exception:
-            logger.exception("GPT directive crafting failed for: %s", feedback)
             return ""
 
     def analyze_expenses(self, question: str, expenses_csv: str) -> str:

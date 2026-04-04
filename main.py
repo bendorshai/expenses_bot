@@ -9,6 +9,7 @@ from categorizer import Categorizer
 from bot import create_bot, retroload
 from parsing import build_currency_lookup
 
+VERSION = "0.0.8"
 CONFIG_PATH = Path(__file__).parent / "config" / "config.json"
 
 logging.basicConfig(
@@ -58,6 +59,13 @@ def main():
 
     async def post_init(application):
         await retroload(application, tg["chat_id"], sheets_client, categorizer, currency_lookup, default_currency)
+        try:
+            await application.bot.send_message(
+                chat_id=tg["chat_id"],
+                text=f"🚀 עלתה גרסה חדשה: {VERSION}",
+            )
+        except Exception:
+            logger.exception("Failed to send startup message")
 
     app.post_init = post_init
 

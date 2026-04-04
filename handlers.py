@@ -10,7 +10,7 @@ from telegram.ext import ContextTypes
 
 from sheets import SheetsClient
 from categorizer import Categorizer
-from parsing import parse_date_token, detect_mode_change, parse_expense_line, build_currency_lookup, is_edit_request
+from parsing import parse_date_token, detect_mode_change, parse_expense_line, build_currency_lookup, is_edit_request, extract_category_hint
 from keyboards import (
     THUMBS_UP, OK_HAND,
     CALLBACK_PREFIX_EDIT, CALLBACK_PREFIX_EDIT_DESC, CALLBACK_PREFIX_EDIT_AMT,
@@ -102,6 +102,7 @@ class ExpenseHandlers:
         categories: list[str],
         directives: list[str],
         expense_date: date | None = None,
+        category_hint: str | None = None,
     ) -> tuple[int, str]:
         row_number = self.sheets.append_expense(
             amount=amount, description=description, currency=currency, expense_date=expense_date,
@@ -110,10 +111,10 @@ class ExpenseHandlers:
 
         category = ""
         try:
-            category = self.categorizer.categorize(description, categories, directives)
+            category = self.categorizer.categorize(description, categories, directives, category_hint=category_hint)
             if category:
                 self.sheets.update_category(row_number, category)
-                logger.info("Categorized '%s' -> '%s'", description, category)
+                logger.info("Categorized '%s' -> '%s' (hint=%s)", description, category, category_hint)
         except Exception:
             logger.exception("Failed to categorize expense: %s", description)
 
@@ -170,10 +171,12 @@ class ExpenseHandlers:
         all_buttons: list[list] = []
         for amount, description, inline_currency, expense_date in expenses:
             currency = inline_currency or user_mode_currency
+            description, category_hint = extract_category_hint(description)
             try:
                 row_number, category = await self._process_single_expense(
                     description, amount, currency, categories, directives,
                     expense_date=expense_date,
+                    category_hint=category_hint,
                 )
                 cat_display = category if category else "לא זוהה"
                 date_display = expense_date.strftime("%d/%m/%Y") if expense_date else None
