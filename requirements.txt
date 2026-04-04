@@ -2,4 +2,5 @@ python-telegram-bot==21.6
 gspread==6.1.4
 google-auth==2.36.0
 openai==1.66.3
+pymongo==4.11.3
 pytz==2024.2
