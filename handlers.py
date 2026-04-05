@@ -19,7 +19,7 @@ from keyboards import (
     CALLBACK_PREFIX_CAT, CALLBACK_PREFIX_CUR_SET, CALLBACK_PREFIX_CUR_MENU,
     CALLBACK_PREFIX_CUR_MODE,
     CALLBACK_PREFIX_UPDATE, CALLBACK_PREFIX_DELETE, CALLBACK_PREFIX_DIRECTIVE,
-    CALLBACK_PREFIX_SUGGEST_DIR,
+    CALLBACK_PREFIX_SUGGEST_DIR, CALLBACK_PREFIX_DECLINE_DIR,
     CALLBACK_PREFIX_INSIGHTS_SUMMARY, CALLBACK_PREFIX_INSIGHTS_ASK,
     CALLBACK_PREFIX_BACK, CALLBACK_PREFIX_BACK_EDIT, CALLBACK_PREFIX_MAIN_MENU,
     make_edit_button, make_edit_menu_keyboard, make_cancel_keyboard,
@@ -472,17 +472,17 @@ class ExpenseHandlers:
 
             suggested_directive = f"{description} זה {category}"
             context.chat_data[f"suggested_dir_{query.message.message_id}"] = suggested_directive
+            context.chat_data[f"suggested_cat_{query.message.message_id}"] = category
 
             keyboard = InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("✅ כן, הוסף", callback_data=f"{CALLBACK_PREFIX_SUGGEST_DIR}{row_number}"),
-                    InlineKeyboardButton("❌ לא", callback_data=f"{CALLBACK_PREFIX_BACK_EDIT}{row_number}"),
+                    InlineKeyboardButton("✅ כן", callback_data=f"{CALLBACK_PREFIX_SUGGEST_DIR}{row_number}"),
+                    InlineKeyboardButton("❌ לא", callback_data=f"{CALLBACK_PREFIX_DECLINE_DIR}{row_number}"),
                 ],
             ])
             await query.edit_message_text(
                 f"{base}\n\n✓ סיווג עודכן: {category}"
-                f"\n\n💡 רוצה שאזכור לפעם הבאה?"
-                f'\nהוסף הנחיה: "{suggested_directive}"',
+                f'\n\n💡 לסווג "{description}" כ"{category}" גם בפעם הבאה?',
                 reply_markup=keyboard,
             )
         except Exception:
@@ -514,6 +514,23 @@ class ExpenseHandlers:
         keyboard = make_edit_menu_keyboard(row_number)
         await query.edit_message_text(
             f"{base}\n\n{status}\n\nעריכה: {description}",
+            reply_markup=keyboard,
+        )
+
+    async def handle_decline_directive(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+        row_number = int(query.data.removeprefix(CALLBACK_PREFIX_DECLINE_DIR))
+
+        context.chat_data.pop(f"suggested_dir_{query.message.message_id}", None)
+        category = context.chat_data.pop(f"suggested_cat_{query.message.message_id}", "")
+        editing = context.chat_data.get(f"editing_{query.message.message_id}", {})
+        description = editing.get("description", "")
+        base = editing.get("base_text", base_text(query.message.text or ""))
+
+        keyboard = make_edit_menu_keyboard(row_number)
+        await query.edit_message_text(
+            f"{base}\n\n✓ סיווג עודכן: {category}\n\nעריכה: {description}",
             reply_markup=keyboard,
         )
 

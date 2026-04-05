@@ -10,7 +10,8 @@ from storage import MongoStorage
 from bot import create_bot, retroload
 from parsing import build_currency_lookup
 
-VERSION = "0.1.5"
+VERSION = "0.1.6"
+VERSION_NOTES = "הצעה להוסיף הנחיית סיווג אחרי שינוי קטגוריה ידני"
 CONFIG_PATH = Path(__file__).parent / "config" / "config.json"
 
 logging.basicConfig(
@@ -94,7 +95,7 @@ def main():
         try:
             await application.bot.send_message(
                 chat_id=tg["chat_id"],
-                text=f"🚀 עלתה גרסה חדשה: {VERSION}",
+                text=f"🚀 עלתה גרסה חדשה: {VERSION}\n{VERSION_NOTES}",
             )
         except Exception:
             logger.exception("Failed to send startup message")
