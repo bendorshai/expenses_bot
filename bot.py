@@ -12,10 +12,12 @@ from telegram.ext import (
     filters,
 )
 
+from datetime import datetime
+
 from sheets import SheetsClient
 from categorizer import Categorizer
 from storage import MongoStorage
-from parsing import build_currency_lookup, parse_expense_line
+from parsing import build_currency_lookup, israel_today
 from keyboards import (
     OK_HAND,
     CALLBACK_PREFIX_EDIT, CALLBACK_PREFIX_EDIT_DESC, CALLBACK_PREFIX_EDIT_AMT,
@@ -47,7 +49,7 @@ async def retroload(
     chat_id: int,
     sheets_client: SheetsClient,
     categorizer: Categorizer,
-    currency_lookup: dict[str, str],
+    currencies: list[str],
     default_currency: str,
 ) -> None:
     """Process all pending updates (messages sent while bot was offline)."""
@@ -67,6 +69,7 @@ async def retroload(
 
     logger.info("Retroload: found %d pending update(s)", len(updates))
 
+    today_str = israel_today().strftime("%d/%m/%Y")
     categories = sheets_client.get_categories()
     directives = sheets_client.get_directives()
     processed = 0
@@ -76,42 +79,54 @@ async def retroload(
         if not msg or not msg.text or msg.chat_id != chat_id:
             continue
 
-        lines = [line.strip() for line in msg.text.strip().splitlines() if line.strip()]
-        expenses = []
-        for line in lines:
-            parsed = parse_expense_line(line, currency_lookup)
-            if parsed:
-                expenses.append(parsed)
+        result = categorizer.parse_message(
+            text=msg.text,
+            categories=categories,
+            directives=directives,
+            currencies=currencies,
+            default_currency=default_currency,
+            today_str=today_str,
+        )
 
-        if not expenses:
+        if result.type != "expenses" or not result.expenses:
             logger.info("Retroload: skipping non-expense message: %s", msg.text[:80])
             continue
 
         results = []
         all_buttons: list[list] = []
-        for amount, description, inline_currency, expense_date in expenses:
-            currency = inline_currency or default_currency
+        for expense in result.expenses:
             try:
+                expense_date = None
+                if expense.date:
+                    try:
+                        expense_date = datetime.strptime(expense.date, "%d/%m/%Y").date()
+                    except ValueError:
+                        logger.warning("Retroload: invalid date from GPT: %s", expense.date)
+
                 row_number = sheets_client.append_expense(
-                    amount=amount, description=description, currency=currency, expense_date=expense_date,
+                    amount=expense.amount,
+                    description=expense.description,
+                    currency=expense.currency,
+                    expense_date=expense_date,
                 )
-                category = categorizer.categorize(description, categories, directives)
-                if category:
-                    sheets_client.update_category(row_number, category)
-                cat_display = category if category else "לא זוהה"
-                date_display = expense_date.strftime("%d/%m/%Y") if expense_date else None
-                results.append((row_number, description, cat_display, currency, date_display))
-                all_buttons.append(make_edit_button(row_number, description))
+                if expense.category:
+                    sheets_client.update_category(row_number, expense.category)
+
+                cat_display = expense.category if expense.category else "לא זוהה"
+                results.append((row_number, expense.description, expense.amount,
+                                cat_display, expense.currency, expense.date))
+                all_buttons.append(make_edit_button(row_number, expense.description))
                 logger.info("Retroload: %s %s [%s] -> row %d, category: %s",
-                            amount, description, currency, row_number, category or "N/A")
+                            expense.amount, expense.description, expense.currency,
+                            row_number, expense.category or "N/A")
                 processed += 1
             except Exception:
-                logger.exception("Retroload: failed to process expense: %s", description)
+                logger.exception("Retroload: failed to process expense: %s", expense.description)
 
         if results:
             reply_lines = []
-            for _, description, cat_display, currency, date_display in results:
-                line = f"{description}: {cat_display} [{currency}]"
+            for _, description, amount, cat_display, currency, date_display in results:
+                line = f"{description}: {amount} {currency} — {cat_display}"
                 if date_display:
                     line += f" ({date_display})"
                 reply_lines.append(line)

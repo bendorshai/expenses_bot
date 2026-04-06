@@ -11,7 +11,7 @@ from telegram.ext import ContextTypes
 from sheets import SheetsClient
 from categorizer import Categorizer
 from storage import MongoStorage
-from parsing import parse_date_token, detect_mode_change, parse_expense_line, build_currency_lookup, is_edit_request, extract_category_hint
+from parsing import parse_date_token, detect_mode_change, build_currency_lookup, is_edit_request, israel_today
 from keyboards import (
     THUMBS_UP, OK_HAND,
     CALLBACK_PREFIX_EDIT, CALLBACK_PREFIX_EDIT_DESC, CALLBACK_PREFIX_EDIT_AMT,
@@ -104,32 +104,6 @@ class ExpenseHandlers:
             logger.exception("Failed to persist currency to MongoDB for user %d", user_id)
             return False
 
-    async def _process_single_expense(
-        self,
-        description: str,
-        amount: float,
-        currency: str,
-        categories: list[str],
-        directives: list[str],
-        expense_date: date | None = None,
-        category_hint: str | None = None,
-    ) -> tuple[int, str]:
-        row_number = self.sheets.append_expense(
-            amount=amount, description=description, currency=currency, expense_date=expense_date,
-        )
-        logger.info("Recorded expense: %s %s [%s] (row %d)", amount, description, currency, row_number)
-
-        category = ""
-        try:
-            category = self.categorizer.categorize(description, categories, directives, category_hint=category_hint)
-            if category:
-                self.sheets.update_category(row_number, category)
-                logger.info("Categorized '%s' -> '%s' (hint=%s)", description, category, category_hint)
-        except Exception:
-            logger.exception("Failed to categorize expense: %s", description)
-
-        return row_number, category
-
     # ------------------------------------------------------------------
     # Message handler
     # ------------------------------------------------------------------
@@ -161,47 +135,63 @@ class ExpenseHandlers:
         if await self._handle_pending_edit(message, context):
             return
 
-        lines = [line.strip() for line in message.text.strip().splitlines() if line.strip()]
-        expenses = []
-        for line in lines:
-            parsed = parse_expense_line(line, self.currency_lookup)
-            if parsed:
-                expenses.append(parsed)
+        await message.set_reaction(THUMBS_UP)
 
-        if not expenses:
+        user_currency = self._get_user_currency(context, user_id, self.default_currency)
+        today = israel_today()
+        result = self.categorizer.parse_message(
+            text=message.text,
+            categories=self._categories,
+            directives=self._directives,
+            currencies=self.currency_list,
+            default_currency=user_currency,
+            today_str=today.strftime("%d/%m/%Y"),
+        )
+
+        if result.type == "query":
             await self._answer_freetext_question(message)
             return
 
-        await message.set_reaction(THUMBS_UP)
-
-        user_mode_currency = self._get_user_currency(context, user_id, self.default_currency)
-        categories = self._categories
-        directives = self._directives
+        if result.type == "unknown" or not result.expenses:
+            return
 
         results = []
         all_buttons: list[list] = []
-        for amount, description, inline_currency, expense_date in expenses:
-            currency = inline_currency or user_mode_currency
-            description, category_hint = extract_category_hint(description)
+        for expense in result.expenses:
             try:
-                row_number, category = await self._process_single_expense(
-                    description, amount, currency, categories, directives,
+                expense_date = None
+                if expense.date:
+                    try:
+                        expense_date = datetime.strptime(expense.date, "%d/%m/%Y").date()
+                    except ValueError:
+                        logger.warning("Invalid date from GPT: %s", expense.date)
+
+                row_number = self.sheets.append_expense(
+                    amount=expense.amount,
+                    description=expense.description,
+                    currency=expense.currency,
                     expense_date=expense_date,
-                    category_hint=category_hint,
                 )
-                cat_display = category if category else "לא זוהה"
-                date_display = expense_date.strftime("%d/%m/%Y") if expense_date else None
-                results.append((row_number, description, cat_display, currency, date_display))
-                all_buttons.append(make_edit_button(row_number, description))
+                logger.info("Recorded expense: %s %s [%s] (row %d)",
+                            expense.amount, expense.description, expense.currency, row_number)
+
+                if expense.category:
+                    self.sheets.update_category(row_number, expense.category)
+                    logger.info("Categorized '%s' -> '%s'", expense.description, expense.category)
+
+                cat_display = expense.category if expense.category else "לא זוהה"
+                results.append((row_number, expense.description, expense.amount,
+                                cat_display, expense.currency, expense.date))
+                all_buttons.append(make_edit_button(row_number, expense.description))
             except Exception:
-                logger.exception("Failed to record expense: %s", description)
+                logger.exception("Failed to record expense: %s", expense.description)
 
         if not results:
             return
 
         reply_lines = []
-        for _, description, cat_display, currency, date_display in results:
-            line = f"{description}: {cat_display} [{currency}]"
+        for _, description, amount, cat_display, currency, date_display in results:
+            line = f"{description}: {amount} {currency} — {cat_display}"
             if date_display:
                 line += f" ({date_display})"
             reply_lines.append(line)

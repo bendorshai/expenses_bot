@@ -8,10 +8,9 @@ from sheets import SheetsClient
 from categorizer import Categorizer
 from storage import MongoStorage
 from bot import create_bot, retroload
-from parsing import build_currency_lookup
 
-VERSION = "0.1.6"
-VERSION_NOTES = "הצעה להוסיף הנחיית סיווג אחרי שינוי קטגוריה ידני"
+VERSION = "0.2.0"
+VERSION_NOTES = "מסתמך יותר על ג'פטו ופחות על הודעות מבניות"
 CONFIG_PATH = Path(__file__).parent / "config" / "config.json"
 
 logging.basicConfig(
@@ -80,8 +79,6 @@ def main():
     mongo_cfg = cfg["mongodb"]
     mongo_storage = MongoStorage(uri=mongo_cfg["uri"], db_name=mongo_cfg["db_name"])
 
-    currency_lookup = build_currency_lookup(currencies)
-
     app = create_bot(tg["bot_token"], tg["chat_id"], sheets_client, categorizer, currencies, default_currency, mongo_storage)
 
     async def post_init(application):
@@ -91,7 +88,7 @@ def main():
                 application._chat_data[tg["chat_id"]] = {}
             application._chat_data[tg["chat_id"]]["user_currencies"] = saved_currencies
             logger.info("Loaded %d user currency preferences from MongoDB", len(saved_currencies))
-        await retroload(application, tg["chat_id"], sheets_client, categorizer, currency_lookup, default_currency)
+        await retroload(application, tg["chat_id"], sheets_client, categorizer, currencies, default_currency)
         try:
             await application.bot.send_message(
                 chat_id=tg["chat_id"],

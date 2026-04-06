@@ -7,8 +7,6 @@ import pytz
 
 IL_TZ = pytz.timezone("Asia/Jerusalem")
 
-NUM = r"\d+(?:\.\d+)?"
-
 DATE_KEYWORDS: dict[str, int] = {
     "אתמול": 1,
     "שלשום": 2,
@@ -110,77 +108,4 @@ def detect_mode_change(text: str, lookup: dict[str, str]) -> str | None:
         if match:
             raw = match.group(1).strip()
             return normalize_currency(raw, lookup)
-    return None
-
-
-def _strip_date_token(text: str) -> tuple[str, date | None]:
-    """Try to extract a date token from the start or end of the text.
-
-    Returns (remaining_text, parsed_date_or_None).
-    """
-    words = text.split()
-    if not words:
-        return text, None
-
-    d = parse_date_token(words[0])
-    if d is not None:
-        return " ".join(words[1:]), d
-
-    d = parse_date_token(words[-1])
-    if d is not None:
-        return " ".join(words[:-1]), d
-
-    return text, None
-
-
-def extract_category_hint(description: str) -> tuple[str, str | None]:
-    """Extract a parenthesized category hint from the description.
-
-    Returns (clean_description, hint_or_None).
-    Example: "כרטיס טיסה (טיסות)" -> ("כרטיס טיסה", "טיסות")
-    """
-    m = re.search(r"\(([^)]+)\)\s*$", description)
-    if m:
-        hint = m.group(1).strip()
-        clean = description[:m.start()].strip()
-        if clean:
-            return clean, hint
-    return description, None
-
-
-def parse_expense_line(text: str, lookup: dict[str, str]) -> tuple[float, str, str | None, date | None] | None:
-    """Parse a single expense line. Returns (amount, description, currency_or_None, date_or_None).
-
-    Supported formats (date token optional at start or end):
-        [<time>] <amount> [<currency>] <description> [<time>]
-        [<time>] <description> <amount> [<currency>] [<time>]
-    """
-    text = text.strip()
-    if not text:
-        return None
-
-    text, expense_date = _strip_date_token(text)
-    text = text.strip()
-    if not text:
-        return None
-
-    m = re.match(rf"^({NUM})\s+(.+)$", text)
-    if m:
-        amount = float(m.group(1))
-        rest = m.group(2).strip()
-        words = rest.split(maxsplit=1)
-        if len(words) >= 2:
-            cur = normalize_currency(words[0], lookup)
-            if cur:
-                return amount, words[1].strip(), cur, expense_date
-        return amount, rest, None, expense_date
-
-    m = re.match(rf"^(.+)\s+({NUM})(?:\s+(\S+))?\s*$", text)
-    if m:
-        description = m.group(1).strip()
-        amount = float(m.group(2))
-        cur_word = m.group(3)
-        cur = normalize_currency(cur_word, lookup) if cur_word else None
-        return amount, description, cur, expense_date
-
     return None
