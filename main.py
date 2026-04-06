@@ -9,8 +9,8 @@ from categorizer import Categorizer
 from storage import MongoStorage
 from bot import create_bot, retroload
 
-VERSION = "0.2.0"
-VERSION_NOTES = "מסתמך יותר על ג'פטו ופחות על הודעות מבניות"
+VERSION = "0.3.0"
+VERSION_NOTES = "תיקון תפריטים ויותר הסתמכות על ג'פטו"
 CONFIG_PATH = Path(__file__).parent / "config" / "config.json"
 
 logging.basicConfig(

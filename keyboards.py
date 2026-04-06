@@ -35,17 +35,14 @@ def make_edit_button(row_number: int, description: str) -> list[InlineKeyboardBu
 def make_edit_menu_keyboard(row_number: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("תיאור", callback_data=f"{CALLBACK_PREFIX_EDIT_DESC}{row_number}"),
             InlineKeyboardButton("סכום", callback_data=f"{CALLBACK_PREFIX_EDIT_AMT}{row_number}"),
-        ],
-        [
-            InlineKeyboardButton("מטבע", callback_data=f"{CALLBACK_PREFIX_EDIT_CUR}{row_number}"),
             InlineKeyboardButton("תאריך", callback_data=f"{CALLBACK_PREFIX_EDIT_DATE}{row_number}"),
         ],
         [
-            InlineKeyboardButton("סיווג", callback_data=f"{CALLBACK_PREFIX_EDIT_CAT}{row_number}"),
-            InlineKeyboardButton("הנחיה לסיווג עתידי", callback_data=f"{CALLBACK_PREFIX_DIRECTIVE}{row_number}"),
+            InlineKeyboardButton("תיאור", callback_data=f"{CALLBACK_PREFIX_EDIT_DESC}{row_number}"),
+            InlineKeyboardButton("מטבע", callback_data=f"{CALLBACK_PREFIX_EDIT_CUR}{row_number}"),
         ],
+        [InlineKeyboardButton("סיווג", callback_data=f"{CALLBACK_PREFIX_EDIT_CAT}{row_number}")],
         [InlineKeyboardButton("מחיקה", callback_data=f"{CALLBACK_PREFIX_DELETE}{row_number}")],
         [InlineKeyboardButton("חזור", callback_data=f"{CALLBACK_PREFIX_BACK}")],
     ])
@@ -83,16 +80,20 @@ def make_insights_keyboard() -> InlineKeyboardMarkup:
 
 def make_main_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("📊 סיכום חודשי", callback_data=f"{CALLBACK_PREFIX_INSIGHTS_SUMMARY}0"),
-            InlineKeyboardButton("🔍 שאל שאלה", callback_data=f"{CALLBACK_PREFIX_INSIGHTS_ASK}0"),
-        ],
-        [
-            InlineKeyboardButton("💱 מצב מטבע", callback_data=f"{CALLBACK_PREFIX_MAIN_MENU}currency"),
-            InlineKeyboardButton("📋 הנחיות סיווג", callback_data=f"{CALLBACK_PREFIX_MAIN_MENU}directives"),
-        ],
-        [InlineKeyboardButton("חזור", callback_data=f"{CALLBACK_PREFIX_MAIN_MENU}home")],
+        [InlineKeyboardButton("🔍 שאל שאלה", callback_data=f"{CALLBACK_PREFIX_INSIGHTS_ASK}0")],
+        [InlineKeyboardButton("💱 עדכן מצב מטבע", callback_data=f"{CALLBACK_PREFIX_MAIN_MENU}currency")],
+        [InlineKeyboardButton("📋 הנחיית סיווג", callback_data=f"{CALLBACK_PREFIX_MAIN_MENU}directives")],
+        [InlineKeyboardButton("📊 סיכום חודשי", callback_data=f"{CALLBACK_PREFIX_INSIGHTS_SUMMARY}0")],
     ])
+
+
+def make_currency_mode_keyboard(currency_list: list[str], current: str) -> InlineKeyboardMarkup:
+    buttons = []
+    for cur in currency_list:
+        label = f"✓ {cur}" if cur == current else cur
+        buttons.append([InlineKeyboardButton(label, callback_data=f"{CALLBACK_PREFIX_MAIN_MENU}curset_{cur}")])
+    buttons.append([InlineKeyboardButton("חזור", callback_data=f"{CALLBACK_PREFIX_MAIN_MENU}home")])
+    return InlineKeyboardMarkup(buttons)
 
 
 def base_text(text: str) -> str:
