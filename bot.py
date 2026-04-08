@@ -35,13 +35,43 @@ from handlers import ExpenseHandlers
 logger = logging.getLogger(__name__)
 
 
-async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logger.error("Unhandled exception while processing update:", exc_info=context.error)
-    if isinstance(update, Update) and update.effective_message:
+def _make_error_handler(mongo_storage: MongoStorage):
+    async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        logger.error("Unhandled exception while processing update:", exc_info=context.error)
+
+        chat_id = None
+        message_text = ""
+        update_id = None
+        handler_name = ""
+        if isinstance(update, Update):
+            update_id = update.update_id
+            if update.effective_chat:
+                chat_id = update.effective_chat.id
+            if update.effective_message and update.effective_message.text:
+                message_text = update.effective_message.text
+            if update.callback_query and update.callback_query.data:
+                handler_name = f"callback:{update.callback_query.data}"
+            elif update.effective_message:
+                handler_name = "message"
+
         try:
-            await update.effective_message.reply_text("❌ שגיאה פנימית. נסה שוב.")
+            mongo_storage.log_error(
+                error=context.error,
+                handler=handler_name,
+                chat_id=chat_id,
+                message_text=message_text,
+                update_id=update_id,
+            )
         except Exception:
-            pass
+            logger.exception("Failed to log error to MongoDB")
+
+        if isinstance(update, Update) and update.effective_message:
+            try:
+                await update.effective_message.reply_text("❌ שגיאה פנימית. נסה שוב.")
+            except Exception:
+                pass
+
+    return _error_handler
 
 
 async def retroload(
@@ -200,6 +230,6 @@ def create_bot(
     app.add_handler(CallbackQueryHandler(h.handle_main_menu, pattern=f"^{CALLBACK_PREFIX_MAIN_MENU}"))
     app.add_handler(CallbackQueryHandler(h.handle_back, pattern=f"^{CALLBACK_PREFIX_BACK}"))
 
-    app.add_error_handler(_error_handler)
+    app.add_error_handler(_make_error_handler(mongo_storage))
 
     return app

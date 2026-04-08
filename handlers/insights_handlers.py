@@ -15,7 +15,7 @@ from keyboards import (
     make_insights_keyboard, make_main_menu_keyboard,
 )
 from parsing import israel_today
-from handlers.utils import MAX_TG_LENGTH, PENDING_STATE_TTL, send_long_text
+from handlers.utils import MAX_TG_LENGTH, PENDING_STATE_TTL, send_long_text, safe_answer, safe_react
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +96,7 @@ class InsightsHandlersMixin:
 
     async def handle_insights_summary(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
-        await query.answer("טוען נתונים...")
+        await safe_answer(query, "טוען נתונים...")
         try:
             expenses = self.sheets.get_all_expenses()
             summary = build_monthly_summary(expenses)
@@ -116,7 +116,7 @@ class InsightsHandlersMixin:
 
     async def handle_insights_ask(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
-        await query.answer()
+        await safe_answer(query)
         context.chat_data["pending_question"] = {
             "bot_message_id": query.message.message_id,
             "timestamp": time.time(),
@@ -175,7 +175,7 @@ class InsightsHandlersMixin:
         bot_message_id = pending["bot_message_id"]
         question = message.text.strip()
 
-        await message.set_reaction(THUMBS_UP)
+        await safe_react(message, THUMBS_UP)
 
         try:
             expenses = self.sheets.get_all_expenses()

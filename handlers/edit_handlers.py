@@ -18,6 +18,7 @@ from keyboards import (
     make_edit_menu_keyboard, make_cancel_keyboard,
     make_categories_keyboard, make_currency_keyboard, base_text,
 )
+from handlers.utils import safe_answer
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ class EditHandlersMixin:
 
     async def handle_edit_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
-        await query.answer()
+        await safe_answer(query)
         row_number = int(query.data.removeprefix(CALLBACK_PREFIX_EDIT))
 
         description = ""
@@ -50,7 +51,7 @@ class EditHandlersMixin:
 
     async def handle_edit_description(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
-        await query.answer()
+        await safe_answer(query)
         row_number = int(query.data.removeprefix(CALLBACK_PREFIX_EDIT_DESC))
         context.chat_data["pending_edit"] = {
             "type": "description",
@@ -65,7 +66,7 @@ class EditHandlersMixin:
 
     async def handle_edit_amount(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
-        await query.answer()
+        await safe_answer(query)
         row_number = int(query.data.removeprefix(CALLBACK_PREFIX_EDIT_AMT))
         context.chat_data["pending_edit"] = {
             "type": "amount",
@@ -80,7 +81,7 @@ class EditHandlersMixin:
 
     async def handle_edit_date(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
-        await query.answer()
+        await safe_answer(query)
         row_number = int(query.data.removeprefix(CALLBACK_PREFIX_EDIT_DATE))
         context.chat_data["pending_edit"] = {
             "type": "date",
@@ -96,7 +97,7 @@ class EditHandlersMixin:
 
     async def handle_edit_category(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
-        await query.answer()
+        await safe_answer(query)
         row_number = int(query.data.removeprefix(CALLBACK_PREFIX_EDIT_CAT))
         categories = self._categories
         if not categories:
@@ -108,7 +109,7 @@ class EditHandlersMixin:
 
     async def handle_edit_currency(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
-        await query.answer()
+        await safe_answer(query)
         row_number = int(query.data.removeprefix(CALLBACK_PREFIX_EDIT_CUR))
         keyboard = make_currency_keyboard(row_number, self.currency_list)
         base = base_text(query.message.text or "")
@@ -116,7 +117,7 @@ class EditHandlersMixin:
 
     async def handle_directive(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
-        await query.answer()
+        await safe_answer(query)
         row_number = int(query.data.removeprefix(CALLBACK_PREFIX_DIRECTIVE))
         context.chat_data["pending_edit"] = {
             "type": "directive",
@@ -142,7 +143,7 @@ class EditHandlersMixin:
 
     async def handle_update_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
-        await query.answer()
+        await safe_answer(query)
 
         row_number = int(query.data.removeprefix(CALLBACK_PREFIX_UPDATE))
         categories = self._categories
@@ -156,7 +157,7 @@ class EditHandlersMixin:
 
     async def handle_category_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
-        await query.answer()
+        await safe_answer(query)
 
         payload = query.data.removeprefix(CALLBACK_PREFIX_CAT)
         row_str, category = payload.split(":", 1)
@@ -191,7 +192,7 @@ class EditHandlersMixin:
 
     async def handle_suggest_directive(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
-        await query.answer()
+        await safe_answer(query)
         row_number = int(query.data.removeprefix(CALLBACK_PREFIX_SUGGEST_DIR))
 
         directive = context.chat_data.pop(f"suggested_dir_{query.message.message_id}", "")
@@ -219,7 +220,7 @@ class EditHandlersMixin:
 
     async def handle_decline_directive(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
-        await query.answer()
+        await safe_answer(query)
         row_number = int(query.data.removeprefix(CALLBACK_PREFIX_DECLINE_DIR))
 
         context.chat_data.pop(f"suggested_dir_{query.message.message_id}", None)
@@ -236,7 +237,7 @@ class EditHandlersMixin:
 
     async def handle_currency_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
-        await query.answer()
+        await safe_answer(query)
 
         row_number = int(query.data.removeprefix(CALLBACK_PREFIX_CUR_MENU))
         keyboard = make_currency_keyboard(row_number, self.currency_list)
@@ -245,7 +246,7 @@ class EditHandlersMixin:
 
     async def handle_currency_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
-        await query.answer()
+        await safe_answer(query)
 
         payload = query.data.removeprefix(CALLBACK_PREFIX_CUR_SET)
         row_str, currency = payload.split(":", 1)
@@ -286,7 +287,7 @@ class EditHandlersMixin:
 
     async def handle_currency_mode_switch(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
-        await query.answer()
+        await safe_answer(query)
 
         payload = query.data.removeprefix(CALLBACK_PREFIX_CUR_MODE)
         row_str, currency = payload.split(":", 1)
@@ -313,7 +314,7 @@ class EditHandlersMixin:
 
     async def handle_delete(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
-        await query.answer()
+        await safe_answer(query)
         row_number = int(query.data.removeprefix(CALLBACK_PREFIX_DELETE))
         try:
             self.sheets.delete_row(row_number)
@@ -326,7 +327,7 @@ class EditHandlersMixin:
 
     async def handle_back(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
-        await query.answer()
+        await safe_answer(query)
         stored_buttons = context.chat_data.get(f"buttons_{query.message.message_id}", [])
         keyboard = InlineKeyboardMarkup(stored_buttons) if stored_buttons else None
         base = base_text(query.message.text or "")
@@ -335,7 +336,7 @@ class EditHandlersMixin:
     async def handle_back_to_edit(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Return to the edit menu from category/currency grids or cancel a pending text input."""
         query = update.callback_query
-        await query.answer()
+        await safe_answer(query)
         row_number = int(query.data.removeprefix(CALLBACK_PREFIX_BACK_EDIT))
 
         context.chat_data.pop("pending_edit", None)

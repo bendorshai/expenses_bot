@@ -10,6 +10,7 @@ from keyboards import (
     CALLBACK_PREFIX_MAIN_MENU,
     make_main_menu_keyboard, make_currency_mode_keyboard,
 )
+from handlers.utils import safe_answer
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ class MenuHandlersMixin:
 
     async def handle_main_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
-        await query.answer()
+        await safe_answer(query)
         action = query.data.removeprefix(CALLBACK_PREFIX_MAIN_MENU)
 
         context.chat_data.pop("pending_question", None)
@@ -106,10 +107,12 @@ class MenuHandlersMixin:
 
     def _schedule_welcome(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Cancel any pending welcome job and schedule a new one 60s from now."""
-        old_job = context.chat_data.get("welcome_job")
+        old_job = context.chat_data.pop("welcome_job", None)
         if old_job is not None:
-            old_job.schedule_removal()
-            context.chat_data.pop("welcome_job", None)
+            try:
+                old_job.schedule_removal()
+            except Exception:
+                pass
 
         job_queue = context.application.job_queue
         if job_queue is None:

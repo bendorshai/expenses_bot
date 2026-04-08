@@ -16,7 +16,7 @@ from keyboards import (
     CALLBACK_PREFIX_EDIT,
     make_edit_button, make_edit_menu_keyboard, make_main_menu_keyboard, base_text,
 )
-from handlers.utils import PENDING_STATE_TTL
+from handlers.utils import PENDING_STATE_TTL, safe_react
 from handlers.edit_handlers import EditHandlersMixin
 from handlers.insights_handlers import InsightsHandlersMixin
 from handlers.menu_handlers import MenuHandlersMixin
@@ -98,7 +98,7 @@ class ExpenseHandlers(EditHandlersMixin, InsightsHandlersMixin, MenuHandlersMixi
             saved = self._set_user_currency(context, user_id, mode_currency)
             db_status = "✅ נשמר במסד הנתונים" if saved else "⚠️ לא הצלחתי לשמור במסד הנתונים"
             await message.reply_text(f"מצב מטבע עודכן: {mode_currency}\n{db_status}")
-            await message.set_reaction(OK_HAND)
+            await safe_react(message, OK_HAND)
             return
 
         if await self._handle_reply_edit(message, context):
@@ -110,7 +110,7 @@ class ExpenseHandlers(EditHandlersMixin, InsightsHandlersMixin, MenuHandlersMixi
         if await self._handle_pending_edit(message, context):
             return
 
-        await message.set_reaction(THUMBS_UP)
+        await safe_react(message, THUMBS_UP)
 
         user_currency = self._get_user_currency(context, user_id, self.default_currency)
         today = israel_today()
@@ -174,9 +174,12 @@ class ExpenseHandlers(EditHandlersMixin, InsightsHandlersMixin, MenuHandlersMixi
         keyboard = InlineKeyboardMarkup(all_buttons)
         reply_msg = await message.reply_text("\n".join(reply_lines), reply_markup=keyboard)
         context.chat_data[f"buttons_{reply_msg.message_id}"] = all_buttons
-        await message.set_reaction(OK_HAND)
+        await safe_react(message, OK_HAND)
 
-        self._schedule_welcome(context)
+        try:
+            self._schedule_welcome(context)
+        except Exception:
+            logger.debug("Could not schedule welcome message")
 
     async def _handle_reply_edit(self, message, context: ContextTypes.DEFAULT_TYPE) -> bool:
         """If the user replies to a bot expense message with an edit trigger word, open the edit menu."""
@@ -207,7 +210,7 @@ class ExpenseHandlers(EditHandlersMixin, InsightsHandlersMixin, MenuHandlersMixi
                 reply_markup=keyboard,
             )
 
-        await message.set_reaction(OK_HAND)
+        await safe_react(message, OK_HAND)
         return True
 
     async def _handle_pending_edit(self, message, context: ContextTypes.DEFAULT_TYPE) -> bool:
