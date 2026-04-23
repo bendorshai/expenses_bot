@@ -66,6 +66,7 @@ def main():
         categories_tab_name=gs.get("categories_tab_name", "categories"),
         directives_tab_name=gs.get("directives_tab_name", "directives"),
         currencies_tab_name=gs.get("currencies_tab_name", "currencies"),
+        config_sheet_id=gs.get("config_sheet_id"),
     )
     logger.info("Google Sheets client ready (sheet: %s, tab: %s)", gs["sheet_id"], gs["tab_name"])
 

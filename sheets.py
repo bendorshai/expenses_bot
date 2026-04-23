@@ -21,10 +21,12 @@ class SheetsClient:
         categories_tab_name: str = "categories",
         directives_tab_name: str = "directives",
         currencies_tab_name: str = "currencies",
+        config_sheet_id: str | None = None,
     ):
         creds = Credentials.from_service_account_file(credentials_file, scopes=SCOPES)
         self.gc = gspread.authorize(creds)
         self.sheet_id = sheet_id
+        self.config_sheet_id = config_sheet_id or sheet_id
         self.tab_name = tab_name
         self.table_columns = table_columns
         self.total_cols = max(_col_letter_to_index(c) for c in table_columns) + 1
@@ -34,6 +36,9 @@ class SheetsClient:
 
     def _get_spreadsheet(self) -> gspread.Spreadsheet:
         return self.gc.open_by_key(self.sheet_id)
+
+    def _get_config_spreadsheet(self) -> gspread.Spreadsheet:
+        return self.gc.open_by_key(self.config_sheet_id)
 
     def _get_worksheet(self) -> gspread.Worksheet:
         spreadsheet = self._get_spreadsheet()
@@ -151,7 +156,7 @@ class SheetsClient:
 
     def get_categories(self) -> list[str]:
         """Read all category names from column A of the categories tab."""
-        spreadsheet = self._get_spreadsheet()
+        spreadsheet = self._get_config_spreadsheet()
         try:
             ws = spreadsheet.worksheet(self.categories_tab_name)
         except gspread.WorksheetNotFound:
@@ -161,7 +166,7 @@ class SheetsClient:
 
     def get_directives(self) -> list[str]:
         """Read all directives from column A of the directives tab."""
-        spreadsheet = self._get_spreadsheet()
+        spreadsheet = self._get_config_spreadsheet()
         try:
             ws = spreadsheet.worksheet(self.directives_tab_name)
         except gspread.WorksheetNotFound:
@@ -171,7 +176,7 @@ class SheetsClient:
 
     def append_directive(self, directive: str) -> None:
         """Append a new directive to the directives tab."""
-        spreadsheet = self._get_spreadsheet()
+        spreadsheet = self._get_config_spreadsheet()
         try:
             ws = spreadsheet.worksheet(self.directives_tab_name)
         except gspread.WorksheetNotFound:

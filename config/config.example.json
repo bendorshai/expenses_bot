@@ -11,8 +11,9 @@
     "sheet_id": "YOUR_GOOGLE_SHEET_ID",
     "tab_name": "expenses",
     "categories_tab_name": "categories",
-    "directives_tab_name": "directives",
-    "currencies_tab_name": "currencies"
+    "directives_tab_name": "cash-directives",
+    "currencies_tab_name": "currencies",
+    "config_sheet_id": "YOUR_CONFIG_SHEET_ID"
   },
   "mongodb": {
     "uri": "mongodb://localhost:27017",
