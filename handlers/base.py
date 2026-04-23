@@ -88,6 +88,8 @@ class ExpenseHandlers(EditHandlersMixin, InsightsHandlersMixin, MenuHandlersMixi
         if not message or not message.text:
             return
 
+        self.refresh_sheets_data()
+
         if message.chat_id != self.chat_id:
             return
 

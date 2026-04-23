@@ -1,4 +1,4 @@
-"""TDD tests for migrating categories & directives to a remote config sheet.
+"""TDD tests for config sheet migration and on-demand refresh.
 
 Tests verify that:
 - SheetsClient accepts a separate config_sheet_id
@@ -6,12 +6,15 @@ Tests verify that:
 - append_directive() writes to the config sheet
 - get_currencies() still reads from the expenses sheet
 - main.py passes config_sheet_id from config to SheetsClient
+- handle_message() refreshes sheets data before processing
+- handle_edit_category() refreshes sheets data before showing categories
+- bot.py no longer sets up a 60-second polling job
 """
 
 from __future__ import annotations
 
 import sys
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, AsyncMock, patch, call
 import pytest
 
 
@@ -268,3 +271,159 @@ class TestMainPassesConfigSheetId:
             MockSheets.assert_called_once()
             call_kwargs = MockSheets.call_args[1]
             assert call_kwargs.get("config_sheet_id") is None
+
+
+# ---------- On-demand refresh in handle_message ----------
+
+class TestHandleMessageRefreshesData:
+    """handle_message() should call refresh_sheets_data() before processing."""
+
+    @pytest.fixture(autouse=True)
+    def _stub_imports(self):
+        stubs = {}
+        for mod_name in [
+            "telegram", "telegram.ext", "telegram.constants",
+            "openai", "pymongo",
+            "bot", "categorizer", "storage",
+            "parsing", "keyboards",
+        ]:
+            if mod_name not in sys.modules:
+                stubs[mod_name] = MagicMock()
+        with patch.dict(sys.modules, stubs):
+            for m in ["handlers", "handlers.base", "handlers.edit_handlers",
+                       "handlers.menu_handlers", "handlers.insights_handlers", "handlers.utils"]:
+                if m in sys.modules:
+                    del sys.modules[m]
+            yield
+            for m in ["handlers", "handlers.base", "handlers.edit_handlers",
+                       "handlers.menu_handlers", "handlers.insights_handlers", "handlers.utils"]:
+                if m in sys.modules:
+                    del sys.modules[m]
+
+    @pytest.mark.asyncio
+    async def test_refresh_called_before_processing(self):
+        from handlers.base import ExpenseHandlers
+
+        # Use a plain MagicMock (no spec) so attribute access doesn't raise
+        handler = MagicMock()
+        handler.chat_id = 123
+        handler._categories = ["cat1"]
+        handler._directives = []
+        handler.refresh_sheets_data = MagicMock()
+        # Make handle_message stop early after refresh by returning wrong chat
+        handler.chat_id = 999
+
+        message = MagicMock()
+        message.text = "test"
+        message.chat_id = 123  # different from handler.chat_id → early return
+        message.from_user.id = 1
+
+        update = MagicMock()
+        update.effective_message = message
+
+        context = MagicMock()
+
+        await ExpenseHandlers.handle_message(handler, update, context)
+
+        handler.refresh_sheets_data.assert_called_once()
+
+
+# ---------- On-demand refresh in handle_edit_category ----------
+
+class TestEditCategoryRefreshesData:
+    """handle_edit_category() should call refresh_sheets_data() before showing categories."""
+
+    @pytest.fixture(autouse=True)
+    def _stub_imports(self):
+        stubs = {}
+        for mod_name in [
+            "telegram", "telegram.ext", "telegram.constants",
+            "openai", "pymongo",
+            "bot", "categorizer", "storage",
+            "parsing", "keyboards",
+        ]:
+            if mod_name not in sys.modules:
+                stubs[mod_name] = MagicMock()
+        with patch.dict(sys.modules, stubs):
+            for m in ["handlers", "handlers.base", "handlers.edit_handlers",
+                       "handlers.menu_handlers", "handlers.insights_handlers", "handlers.utils"]:
+                if m in sys.modules:
+                    del sys.modules[m]
+            yield
+            for m in ["handlers", "handlers.base", "handlers.edit_handlers",
+                       "handlers.menu_handlers", "handlers.insights_handlers", "handlers.utils"]:
+                if m in sys.modules:
+                    del sys.modules[m]
+
+    @pytest.mark.asyncio
+    async def test_refresh_called_before_showing_categories(self):
+        import handlers.edit_handlers as edit_mod
+        # Patch the mocked constant with real string value
+        edit_mod.CALLBACK_PREFIX_EDIT_CAT = "ecat_"
+        from handlers.edit_handlers import EditHandlersMixin
+
+        handler = MagicMock()
+        handler._categories = ["cat1", "cat2"]
+        handler.refresh_sheets_data = MagicMock()
+
+        query = MagicMock()
+        query.data = "ecat_5"
+        query.message.text = "some text"
+        query.edit_message_text = AsyncMock()
+
+        update = MagicMock()
+        update.callback_query = query
+
+        context = MagicMock()
+
+        await EditHandlersMixin.handle_edit_category(handler, update, context)
+
+        handler.refresh_sheets_data.assert_called_once()
+
+
+# ---------- No polling job in bot.py ----------
+
+class TestNoPollingJob:
+    """create_bot() should NOT set up a run_repeating refresh job."""
+
+    @pytest.fixture(autouse=True)
+    def _stub_imports(self):
+        stubs = {}
+        for mod_name in [
+            "telegram", "telegram.ext", "telegram.constants",
+            "openai", "pymongo",
+            "categorizer", "storage",
+            "handlers", "handlers.base", "handlers.edit_handlers",
+            "handlers.menu_handlers", "handlers.insights_handlers", "handlers.utils",
+            "parsing", "keyboards",
+        ]:
+            if mod_name not in sys.modules:
+                stubs[mod_name] = MagicMock()
+        with patch.dict(sys.modules, stubs):
+            if "bot" in sys.modules:
+                del sys.modules["bot"]
+            yield
+            if "bot" in sys.modules:
+                del sys.modules["bot"]
+
+    def test_no_run_repeating_call(self):
+        from bot import create_bot
+
+        mock_app = MagicMock()
+        mock_app.job_queue = MagicMock()
+
+        with patch("bot.Application") as MockApp, \
+             patch("bot.ExpenseHandlers"):
+            MockApp.builder.return_value.token.return_value.build.return_value = mock_app
+
+            create_bot(
+                token="tok",
+                chat_id=123,
+                sheets_client=MagicMock(),
+                categorizer=MagicMock(),
+                currency_list=["שקל"],
+                default_currency="שקל",
+                mongo_storage=MagicMock(),
+            )
+
+            mock_app.job_queue.run_repeating.assert_not_called()

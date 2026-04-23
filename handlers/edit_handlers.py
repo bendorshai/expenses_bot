@@ -98,6 +98,7 @@ class EditHandlersMixin:
     async def handle_edit_category(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await safe_answer(query)
+        self.refresh_sheets_data()
         row_number = int(query.data.removeprefix(CALLBACK_PREFIX_EDIT_CAT))
         categories = self._categories
         if not categories:

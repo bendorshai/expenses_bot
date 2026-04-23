@@ -9,8 +9,8 @@ from categorizer import Categorizer
 from storage import MongoStorage
 from bot import create_bot, retroload
 
-VERSION = "0.5.0"
-VERSION_NOTES = "תיקון באג: רשימת פריטים בשורה אחת (למשל '25.5 ביצים, נייר טואלט, סבון') נרשמת עכשיו כהוצאה אחת עם קטגוריה לפי הרוב"
+VERSION = "0.7.0"
+VERSION_NOTES = "קטגוריות והנחיות עברו לגיליון משותף. רענון נתונים אוטומטי בכל הוצאה ובלחיצה על סיווג (במקום כל 60 שניות)"
 CONFIG_PATH = Path(__file__).parent / "config" / "config.json"
 
 logging.basicConfig(
