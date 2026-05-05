@@ -273,10 +273,10 @@ class TestMainPassesConfigSheetId:
             assert call_kwargs.get("config_sheet_id") is None
 
 
-# ---------- On-demand refresh in handle_message ----------
+# ---------- Background refresh (no per-request refresh) ----------
 
-class TestHandleMessageRefreshesData:
-    """handle_message() should call refresh_sheets_data() before processing."""
+class TestHandleMessageNoRefresh:
+    """handle_message() should NOT call refresh_sheets_data() — data is refreshed by background job."""
 
     @pytest.fixture(autouse=True)
     def _stub_imports(self):
@@ -301,22 +301,18 @@ class TestHandleMessageRefreshesData:
                     del sys.modules[m]
 
     @pytest.mark.asyncio
-    async def test_refresh_called_before_processing(self):
+    async def test_no_refresh_on_message(self):
         from handlers.base import ExpenseHandlers
 
-        # Use a plain MagicMock (no spec) so attribute access doesn't raise
         handler = MagicMock()
-        handler.chat_id = 123
+        handler.chat_id = 999
         handler._categories = ["cat1"]
         handler._directives = []
         handler.refresh_sheets_data = MagicMock()
-        # Make handle_message stop early after refresh by returning wrong chat
-        handler.chat_id = 999
 
         message = MagicMock()
         message.text = "test"
         message.chat_id = 123  # different from handler.chat_id → early return
-        message.from_user.id = 1
 
         update = MagicMock()
         update.effective_message = message
@@ -325,13 +321,13 @@ class TestHandleMessageRefreshesData:
 
         await ExpenseHandlers.handle_message(handler, update, context)
 
-        handler.refresh_sheets_data.assert_called_once()
+        handler.refresh_sheets_data.assert_not_called()
 
 
-# ---------- On-demand refresh in handle_edit_category ----------
+# ---------- Background refresh in handle_edit_category ----------
 
-class TestEditCategoryRefreshesData:
-    """handle_edit_category() should call refresh_sheets_data() before showing categories."""
+class TestEditCategoryNoRefresh:
+    """handle_edit_category() should NOT call refresh_sheets_data() — data is refreshed by background job."""
 
     @pytest.fixture(autouse=True)
     def _stub_imports(self):
@@ -356,14 +352,14 @@ class TestEditCategoryRefreshesData:
                     del sys.modules[m]
 
     @pytest.mark.asyncio
-    async def test_refresh_called_before_showing_categories(self):
+    async def test_no_refresh_on_edit_category(self):
         import handlers.edit_handlers as edit_mod
-        # Patch the mocked constant with real string value
         edit_mod.CALLBACK_PREFIX_EDIT_CAT = "ecat_"
         from handlers.edit_handlers import EditHandlersMixin
 
         handler = MagicMock()
         handler._categories = ["cat1", "cat2"]
+        handler._popular_categories = []
         handler.refresh_sheets_data = MagicMock()
 
         query = MagicMock()
@@ -378,13 +374,13 @@ class TestEditCategoryRefreshesData:
 
         await EditHandlersMixin.handle_edit_category(handler, update, context)
 
-        handler.refresh_sheets_data.assert_called_once()
+        handler.refresh_sheets_data.assert_not_called()
 
 
-# ---------- No polling job in bot.py ----------
+# ---------- Background refresh job in bot.py ----------
 
-class TestNoPollingJob:
-    """create_bot() should NOT set up a run_repeating refresh job."""
+class TestBackgroundRefreshJob:
+    """create_bot() should set up a run_repeating job for background data refresh."""
 
     @pytest.fixture(autouse=True)
     def _stub_imports(self):
@@ -406,7 +402,7 @@ class TestNoPollingJob:
             if "bot" in sys.modules:
                 del sys.modules["bot"]
 
-    def test_no_run_repeating_call(self):
+    def test_run_repeating_called(self):
         from bot import create_bot
 
         mock_app = MagicMock()
@@ -426,4 +422,53 @@ class TestNoPollingJob:
                 mongo_storage=MagicMock(),
             )
 
-            mock_app.job_queue.run_repeating.assert_not_called()
+            mock_app.job_queue.run_repeating.assert_called_once()
+
+
+# ---------- Category ordering ----------
+
+class TestCategoryOrdering:
+    """_order_categories() should return: top popular, then alphabetical, then 'other'/'unknown' last."""
+
+    def _get_order_fn(self):
+        """Import _order_categories with telegram stubbed out."""
+        stubs = {}
+        for mod_name in ["telegram", "telegram.ext", "telegram.constants"]:
+            stubs[mod_name] = MagicMock()
+        saved = sys.modules.pop("keyboards", None)
+        try:
+            with patch.dict(sys.modules, stubs):
+                import keyboards
+                return keyboards._order_categories
+        finally:
+            sys.modules.pop("keyboards", None)
+            if saved is not None:
+                sys.modules["keyboards"] = saved
+
+    def test_popular_first_then_alpha_then_last(self):
+        order = self._get_order_fn()
+        categories = ["אוכל", "תחבורה", "בילויים", "אחר", "קניות", "חשבונות"]
+        popular = ["תחבורה", "קניות", "אוכל"]
+        assert order(categories, popular) == ["תחבורה", "קניות", "אוכל", "בילויים", "חשבונות", "אחר"]
+
+    def test_unknown_and_other_go_last(self):
+        order = self._get_order_fn()
+        categories = ["לא ידוע", "אוכל", "אחר"]
+        assert order(categories, []) == ["אוכל", "לא ידוע", "אחר"]
+
+    def test_empty_popular(self):
+        order = self._get_order_fn()
+        categories = ["ג", "א", "ב", "אחר"]
+        assert order(categories, []) == ["א", "ב", "ג", "אחר"]
+
+    def test_popular_not_in_categories_ignored(self):
+        order = self._get_order_fn()
+        categories = ["אוכל", "תחבורה"]
+        popular = ["deleted_cat", "אוכל"]
+        assert order(categories, popular) == ["אוכל", "תחבורה"]
+
+    def test_max_five_popular(self):
+        order = self._get_order_fn()
+        categories = ["a", "b", "c", "d", "e", "f", "g"]
+        popular = ["g", "f", "e", "d", "c", "b"]
+        assert order(categories, popular) == ["g", "f", "e", "d", "c", "a", "b"]

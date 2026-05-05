@@ -54,9 +54,26 @@ def make_cancel_keyboard(row_number: int) -> InlineKeyboardMarkup:
     ])
 
 
-def make_categories_keyboard(row_number: int, categories: list[str]) -> InlineKeyboardMarkup:
+_LAST_CATEGORIES = {"אחר", "לא ידוע", "unknown", "other"}
+
+
+def _order_categories(categories: list[str], popular: list[str]) -> list[str]:
+    """Order: top popular, then alphabetical, then 'other'/'unknown' last."""
+    cat_set = set(categories)
+    top = [c for c in popular if c in cat_set][:5]
+    used = set(top)
+    bottom = [c for c in categories if c.lower() in _LAST_CATEGORIES and c not in used]
+    used.update(bottom)
+    middle = sorted([c for c in categories if c not in used])
+    return top + middle + bottom
+
+
+def make_categories_keyboard(
+    row_number: int, categories: list[str], popular: list[str] | None = None,
+) -> InlineKeyboardMarkup:
+    ordered = _order_categories(categories, popular or [])
     buttons = []
-    for cat in categories:
+    for cat in ordered:
         buttons.append([InlineKeyboardButton(cat, callback_data=f"{CALLBACK_PREFIX_CAT}{row_number}:{cat}")])
     buttons.append([InlineKeyboardButton("חזור", callback_data=f"{CALLBACK_PREFIX_BACK_EDIT}{row_number}")])
     return InlineKeyboardMarkup(buttons)

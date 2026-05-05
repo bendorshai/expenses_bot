@@ -98,13 +98,12 @@ class EditHandlersMixin:
     async def handle_edit_category(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await safe_answer(query)
-        self.refresh_sheets_data()
         row_number = int(query.data.removeprefix(CALLBACK_PREFIX_EDIT_CAT))
         categories = self._categories
         if not categories:
             await query.edit_message_text("אין קטגוריות מוגדרות בגיליון")
             return
-        keyboard = make_categories_keyboard(row_number, categories)
+        keyboard = make_categories_keyboard(row_number, categories, self._popular_categories)
         base = base_text(query.message.text or "")
         await query.edit_message_text(f"{base}\n\nבחר קטגוריה:", reply_markup=keyboard)
 
@@ -152,7 +151,7 @@ class EditHandlersMixin:
             await query.edit_message_text("אין קטגוריות מוגדרות בגיליון")
             return
 
-        keyboard = make_categories_keyboard(row_number, categories)
+        keyboard = make_categories_keyboard(row_number, categories, self._popular_categories)
         current_text = query.message.text or ""
         await query.edit_message_text(f"{current_text}\n\nבחר קטגוריה:", reply_markup=keyboard)
 

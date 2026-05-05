@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 COLLECTION = "user_currencies"
 ERROR_LOGS_COLLECTION = "error_logs"
+CATEGORY_POPULARITY_COLLECTION = "category_popularity"
 ERROR_LOG_TTL_DAYS = 30
 
 
@@ -19,6 +20,7 @@ class MongoStorage:
         self._db = self._client[db_name]
         self._col = self._db[COLLECTION]
         self._errors = self._db[ERROR_LOGS_COLLECTION]
+        self._cat_pop = self._db[CATEGORY_POPULARITY_COLLECTION]
         self._ensure_error_indexes()
         logger.info("MongoDB connected: %s / %s", uri.split("@")[-1], db_name)
 
@@ -43,6 +45,21 @@ class MongoStorage:
 
     def get_all_user_currencies(self) -> dict[int, str]:
         return {doc["_id"]: doc["currency"] for doc in self._col.find()}
+
+    # ------------------------------------------------------------------
+    # Category popularity
+    # ------------------------------------------------------------------
+
+    def get_popular_categories(self) -> list[str]:
+        doc = self._cat_pop.find_one({"_id": "popular"})
+        return doc["categories"] if doc else []
+
+    def save_popular_categories(self, categories: list[str]) -> None:
+        self._cat_pop.update_one(
+            {"_id": "popular"},
+            {"$set": {"categories": categories, "updated_at": datetime.now(timezone.utc)}},
+            upsert=True,
+        )
 
     # ------------------------------------------------------------------
     # Error logging

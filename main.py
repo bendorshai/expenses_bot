@@ -9,8 +9,8 @@ from categorizer import Categorizer
 from storage import MongoStorage
 from bot import create_bot, retroload
 
-VERSION = "0.8.0"
-VERSION_NOTES = "התיאור בגיליון נשמר כפי שהמשתמש כתב — GPT משמש רק לסיווג, סכום, מטבע ותאריך"
+VERSION = "0.9.0"
+VERSION_NOTES = "קטגוריות מוצגות לפי פופולריות (5 הראשונות), אחר כך א-ב, ואחר/לא ידוע בסוף. רענון נתונים ברקע כל 7 ימים — ללא המתנה בזמן שימוש"
 CONFIG_PATH = Path(__file__).parent / "config" / "config.json"
 
 logging.basicConfig(

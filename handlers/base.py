@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from telegram import Update, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -44,6 +44,7 @@ class ExpenseHandlers(EditHandlersMixin, InsightsHandlersMixin, MenuHandlersMixi
         self.mongo = mongo_storage
         self._categories: list[str] = sheets_client.get_categories()
         self._directives: list[str] = sheets_client.get_directives()
+        self._popular_categories: list[str] = mongo_storage.get_popular_categories()
 
     def refresh_sheets_data(self) -> None:
         """Re-fetch categories, directives, and currencies from sheets."""
@@ -59,6 +60,31 @@ class ExpenseHandlers(EditHandlersMixin, InsightsHandlersMixin, MenuHandlersMixi
                          len(self._categories), len(self._directives), len(self.currency_list))
         except Exception:
             logger.exception("Failed to refresh sheets data")
+
+    def refresh_all_data(self) -> None:
+        """Refresh sheets data and recompute category popularity from last 30 days."""
+        self.refresh_sheets_data()
+        try:
+            expenses = self.sheets.get_all_expenses()
+            cutoff = (datetime.now() - timedelta(days=30)).date()
+            counts: dict[str, int] = {}
+            for exp in expenses:
+                date_str = exp.get("תאריך", "")
+                try:
+                    exp_date = datetime.strptime(date_str, "%d/%m/%Y").date()
+                except ValueError:
+                    continue
+                if exp_date < cutoff:
+                    continue
+                cat = exp.get("סיווג", "").strip()
+                if cat:
+                    counts[cat] = counts.get(cat, 0) + 1
+            top5 = [cat for cat, _ in sorted(counts.items(), key=lambda x: x[1], reverse=True)[:5]]
+            self.mongo.save_popular_categories(top5)
+            self._popular_categories = top5
+            logger.info("Refreshed category popularity: %s", top5)
+        except Exception:
+            logger.exception("Failed to refresh category popularity")
 
     # ------------------------------------------------------------------
     # Helpers
@@ -87,8 +113,6 @@ class ExpenseHandlers(EditHandlersMixin, InsightsHandlersMixin, MenuHandlersMixi
         message = update.effective_message
         if not message or not message.text:
             return
-
-        self.refresh_sheets_data()
 
         if message.chat_id != self.chat_id:
             return

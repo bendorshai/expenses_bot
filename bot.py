@@ -12,7 +12,7 @@ from telegram.ext import (
     filters,
 )
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sheets import SheetsClient
 from categorizer import Categorizer
@@ -223,5 +223,11 @@ def create_bot(
     app.add_handler(CallbackQueryHandler(h.handle_back, pattern=f"^{CALLBACK_PREFIX_BACK}"))
 
     app.add_error_handler(_make_error_handler(mongo_storage))
+
+    async def _refresh_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+        logger.info("Background job: refreshing sheets data and category popularity")
+        h.refresh_all_data()
+
+    app.job_queue.run_repeating(_refresh_job, interval=timedelta(days=7), first=timedelta(seconds=10))
 
     return app
