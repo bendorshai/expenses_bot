@@ -21,7 +21,8 @@ class MenuHandlersMixin:
     WELCOME_TEXT = (
         "שלום! 👋\n"
         "להוספת הוצאות, פשוט שלח הודעה, למשל: חלב 15\n"
-        "או בחר אחת מהאפשרויות:"
+        "או בחר אחת מהאפשרויות:\n\n"
+        "🆕 חדש! תמיכה בריאל ברזילאי (BRL) וקולון קוסטה־ריקני (CRC)"
     )
 
     async def _send_welcome(self, context: ContextTypes.DEFAULT_TYPE) -> None:
