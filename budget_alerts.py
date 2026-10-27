@@ -78,6 +78,40 @@ class BudgetAlerter:
             })
         return alerts
 
+    def build_diagnostic(self) -> str:
+        """On-demand health report (for the /budget command): proves the bot can
+        reach card_to_sheet and parse its JSON, regardless of whether any
+        threshold is crossed. Read-only — never marks thresholds as fired."""
+        status = self.fetch_status()
+        if status is None:
+            return (
+                "❌ לא הצלחתי להתחבר למערכת התקציב (card_to_sheet).\n"
+                f"כתובת: {self.api_url}\n"
+                "בדוק שהשירות למעלה, שה-api_url נכון, ושה-api_token תואם ל-BUDGET_API_TOKEN."
+            )
+        if not status.get("ok"):
+            return f"⚠️ החיבור הצליח אך המערכת החזירה שגיאה:\n{status}"
+
+        cats = status.get("categories", [])
+        year, month = status.get("year"), status.get("month")
+        lines = [
+            "✅ חיבור תקין ל-card_to_sheet, וה-JSON נקרא בהצלחה.",
+            f"חודש {month}/{year} — {len(cats)} קטגוריות עם תקציב:",
+        ]
+        for c in sorted(cats, key=lambda x: x["pct"], reverse=True):
+            lines.append(
+                f"• {c['name']}: {c['pct']:.0f}% (₪{c['spent']:,.0f} / ₪{c['target']:,.0f})"
+            )
+
+        alerts = self.compute_alerts(status)
+        lines.append("")
+        if alerts:
+            names = ", ".join(f"{a['category']} ({a['threshold']}%)" for a in alerts)
+            lines.append(f"🔔 כעת היו נשלחות התראות על: {names}")
+        else:
+            lines.append("🔕 אין כרגע סיפים חדשים שהיו מפעילים התראה.")
+        return "\n".join(lines)
+
     def format_message(self, alerts: list[dict], year: int, month: int) -> str:
         month_name = _MONTHS_HE[month] if 1 <= month <= 12 else str(month)
         lines = [f"📊 התראת תקציב — {month_name} {year}", ""]

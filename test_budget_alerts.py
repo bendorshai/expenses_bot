@@ -159,6 +159,54 @@ class TestFetchStatus:
         g.assert_called_once()
 
 
+class TestBuildDiagnostic:
+    def test_connection_failure_reported(self):
+        alerter, _ = _alerter()
+        alerter.fetch_status = MagicMock(return_value=None)
+        report = alerter.build_diagnostic()
+        assert "❌" in report
+        assert alerter.api_url in report
+
+    def test_ok_lists_categories_and_pct(self):
+        alerter, _ = _alerter()
+        alerter.fetch_status = MagicMock(return_value=_status([
+            {"name": "מזון", "target": 1000.0, "spent": 510.0, "pct": 51.0},
+            {"name": "תחבורה", "target": 500.0, "spent": 100.0, "pct": 20.0},
+        ]))
+        report = alerter.build_diagnostic()
+        assert "✅" in report
+        assert "מזון" in report and "51%" in report
+        assert "תחבורה" in report
+        # Highest-pct category listed first.
+        assert report.index("מזון") < report.index("תחבורה")
+
+    def test_ok_reports_would_fire(self):
+        alerter, _ = _alerter()
+        alerter.fetch_status = MagicMock(return_value=_status([
+            {"name": "מזון", "target": 1000.0, "spent": 800.0, "pct": 80.0},
+        ]))
+        report = alerter.build_diagnostic()
+        assert "🔔" in report
+        assert "מזון" in report
+
+    def test_ok_no_thresholds(self):
+        alerter, _ = _alerter()
+        alerter.fetch_status = MagicMock(return_value=_status([
+            {"name": "מזון", "target": 1000.0, "spent": 100.0, "pct": 10.0},
+        ]))
+        report = alerter.build_diagnostic()
+        assert "🔕" in report
+
+    def test_diagnostic_does_not_mark_fired(self):
+        """Running diagnostics must be read-only."""
+        alerter, mongo = _alerter()
+        alerter.fetch_status = MagicMock(return_value=_status([
+            {"name": "מזון", "target": 1000.0, "spent": 800.0, "pct": 80.0},
+        ]))
+        alerter.build_diagnostic()
+        mongo.mark_thresholds_fired.assert_not_called()
+
+
 class _AsyncRecorder:
     """A minimal awaitable call recorder (MagicMock isn't awaitable)."""
 

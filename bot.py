@@ -216,7 +216,17 @@ def create_bot(
             await alerter.run(context.bot)
 
         app.job_queue.run_daily(_budget_alert_job, time=time(hour=9, tzinfo=IL_TZ))
-        logger.info("Budget alerts enabled — daily check at 09:00 Israel time")
+
+        async def _budget_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+            message = update.effective_message
+            if not message or message.chat_id != chat_id:
+                return
+            # On-demand proof the bot can reach card_to_sheet and parse its JSON.
+            report = alerter.build_diagnostic()
+            await message.reply_text(report)
+
+        app.add_handler(CommandHandler("budget", _budget_cmd))
+        logger.info("Budget alerts enabled — daily check at 09:00 Israel time; /budget for on-demand check")
     else:
         logger.info("Budget alerts disabled (no budget_alerts config)")
 

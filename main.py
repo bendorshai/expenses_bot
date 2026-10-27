@@ -9,8 +9,8 @@ from categorizer import Categorizer
 from storage import MongoStorage
 from bot import create_bot, retroload
 
-VERSION = "0.13.0"
-VERSION_NOTES = "התראות תקציב! פעם ביום הבוט בודק את ניצול התקציב החודשי לכל קטגוריה ושולח התראה כשחוצים 50% / 75% / 100% — כל סף פעם אחת בחודש"
+VERSION = "0.14.0"
+VERSION_NOTES = "נוספה פקודת /budget — בדיקת תקציב על-פי-דרישה: הבוט מתחבר למערכת התקציב, קורא את הנתונים ומחזיר דוח (חיבור, אחוזי ניצול לכל קטגוריה, ואילו התראות היו נשלחות)"
 CONFIG_PATH = Path(__file__).parent / "config" / "config.json"
 
 logging.basicConfig(
