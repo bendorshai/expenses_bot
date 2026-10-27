@@ -12,12 +12,13 @@ from telegram.ext import (
     filters,
 )
 
-from datetime import timedelta
+from datetime import time, timedelta
 
 from sheets import SheetsClient
 from categorizer import Categorizer
 from storage import MongoStorage
-from parsing import build_currency_lookup, israel_today
+from budget_alerts import BudgetAlerter
+from parsing import build_currency_lookup, israel_today, IL_TZ
 from keyboards import (
     OK_HAND,
     CALLBACK_PREFIX_EDIT, CALLBACK_PREFIX_EDIT_DESC, CALLBACK_PREFIX_EDIT_AMT,
@@ -150,6 +151,7 @@ def create_bot(
     currency_list: list[str],
     default_currency: str,
     mongo_storage: MongoStorage,
+    budget_cfg: dict | None = None,
 ) -> Application:
     app = Application.builder().token(token).build()
     currency_lookup = build_currency_lookup(currency_list)
@@ -197,6 +199,26 @@ def create_bot(
         h.refresh_all_data()
 
     app.job_queue.run_repeating(_refresh_job, interval=timedelta(days=7), first=timedelta(seconds=10))
+
+    # Daily budget-threshold alerts (opt-in via config). Reads budget usage from
+    # the card_to_sheet API and notifies when a category crosses 50/75/100%.
+    if budget_cfg and budget_cfg.get("enabled", True) \
+            and budget_cfg.get("api_url") and budget_cfg.get("api_token"):
+        alerter = BudgetAlerter(
+            mongo_storage=mongo_storage,
+            chat_id=chat_id,
+            api_url=budget_cfg["api_url"],
+            api_token=budget_cfg["api_token"],
+        )
+
+        async def _budget_alert_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+            logger.info("Background job: checking budget thresholds")
+            await alerter.run(context.bot)
+
+        app.job_queue.run_daily(_budget_alert_job, time=time(hour=9, tzinfo=IL_TZ))
+        logger.info("Budget alerts enabled — daily check at 09:00 Israel time")
+    else:
+        logger.info("Budget alerts disabled (no budget_alerts config)")
 
     # Expose the handler instance so retroload can reuse its record-and-confirm logic.
     app.bot_data["handlers"] = h

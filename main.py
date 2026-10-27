@@ -9,8 +9,8 @@ from categorizer import Categorizer
 from storage import MongoStorage
 from bot import create_bot, retroload
 
-VERSION = "0.12.0"
-VERSION_NOTES = "נוסף תיעוד הכנסות! בתפריט יש עכשיו \"➕ הוסף הכנסה\" — הבוט שואל תיאור וסכום, והשאר נרשם אוטומטית (הכנסה נכנסת לעמודת זכות)"
+VERSION = "0.13.0"
+VERSION_NOTES = "התראות תקציב! פעם ביום הבוט בודק את ניצול התקציב החודשי לכל קטגוריה ושולח התראה כשחוצים 50% / 75% / 100% — כל סף פעם אחת בחודש"
 CONFIG_PATH = Path(__file__).parent / "config" / "config.json"
 
 logging.basicConfig(
@@ -86,7 +86,9 @@ def main():
     mongo_cfg = cfg["mongodb"]
     mongo_storage = MongoStorage(uri=mongo_cfg["uri"], db_name=mongo_cfg["db_name"])
 
-    app = create_bot(tg["bot_token"], tg["chat_id"], sheets_client, categorizer, currencies, default_currency, mongo_storage)
+    budget_cfg = cfg.get("budget_alerts")
+
+    app = create_bot(tg["bot_token"], tg["chat_id"], sheets_client, categorizer, currencies, default_currency, mongo_storage, budget_cfg)
 
     async def post_init(application):
         saved_currencies = mongo_storage.get_all_user_currencies()

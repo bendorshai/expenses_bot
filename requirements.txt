@@ -4,3 +4,4 @@ google-auth==2.36.0
 openai==1.66.3
 pymongo==4.11.3
 pytz==2024.2
+requests==2.34.2

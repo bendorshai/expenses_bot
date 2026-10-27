@@ -19,6 +19,11 @@
     "uri": "mongodb://localhost:27017",
     "db_name": "expense_tracker"
   },
+  "budget_alerts": {
+    "enabled": true,
+    "api_url": "https://YOUR_CARD_TO_SHEET_DOMAIN/api/budget/status",
+    "api_token": "SHARED_SECRET_MATCHING_BUDGET_API_TOKEN_ON_CARD_TO_SHEET"
+  },
   "table_columns": {
     "A": "תאריך",
     "C": "תיאור",
