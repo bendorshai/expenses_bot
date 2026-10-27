@@ -135,6 +135,7 @@ class TestHandleMessageFallback:
         handler._handle_reply_edit = AsyncMock(return_value=False)
         handler._handle_pending_question = AsyncMock(return_value=False)
         handler._handle_pending_edit = AsyncMock(return_value=False)
+        handler._handle_pending_income = AsyncMock(return_value=False)
         handler._get_user_currency = MagicMock(return_value="שקל")
         handler._try_fallback_expense = ExpenseHandlers._try_fallback_expense
         # Bind the real record-and-confirm helper (handle_message delegates to it).
@@ -183,6 +184,7 @@ class TestHandleMessageFallback:
         handler._handle_reply_edit = AsyncMock(return_value=False)
         handler._handle_pending_question = AsyncMock(return_value=False)
         handler._handle_pending_edit = AsyncMock(return_value=False)
+        handler._handle_pending_income = AsyncMock(return_value=False)
         handler._get_user_currency = MagicMock(return_value="שקל")
 
         message = MagicMock()
@@ -256,6 +258,7 @@ class TestConfirmCategorization:
         handler._handle_reply_edit = AsyncMock(return_value=False)
         handler._handle_pending_question = AsyncMock(return_value=False)
         handler._handle_pending_edit = AsyncMock(return_value=False)
+        handler._handle_pending_income = AsyncMock(return_value=False)
         handler._get_user_currency = MagicMock(return_value="שקל")
         handler._try_fallback_expense = ExpenseHandlers._try_fallback_expense
         handler._record_and_confirm = ExpenseHandlers._record_and_confirm.__get__(handler, ExpenseHandlers)

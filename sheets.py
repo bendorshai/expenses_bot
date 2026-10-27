@@ -88,19 +88,29 @@ class SheetsClient:
         currency: str = "שקל",
         expense_date: date | None = None,
         performer: str | None = None,
+        kind: str = "expense",
     ) -> int:
-        """Append an expense row and return the 1-based row number it was written to."""
+        """Append a transaction row and return the 1-based row number it was written to.
+
+        ``kind="expense"`` (default) records a debit (חובה, תנועה negative); ``kind="income"``
+        records a credit (זכות, תנועה positive) in the sheet's double-entry columns.
+        """
         ws = self._get_worksheet()
         d = expense_date or datetime.now().date()
 
         values = {
             "תאריך": d.strftime("%d/%m/%Y"),
             "תיאור": description,
-            "חובה": str(amount),
-            "זכות": "0",
-            "תנועה": str(-amount),
             "מטבע": currency,
         }
+        if kind == "income":
+            values["חובה"] = "0"
+            values["זכות"] = str(amount)
+            values["תנועה"] = str(amount)
+        else:
+            values["חובה"] = str(amount)
+            values["זכות"] = "0"
+            values["תנועה"] = str(-amount)
         if performer:
             values["מבצע"] = performer
 

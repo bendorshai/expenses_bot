@@ -16,6 +16,7 @@ from parsing import parse_date_token, detect_mode_change, build_currency_lookup,
 from keyboards import (
     THUMBS_UP, OK_HAND,
     CALLBACK_PREFIX_EDIT, CALLBACK_PREFIX_CONFIRM_CAT, CALLBACK_PREFIX_REJECT_CAT,
+    CALLBACK_PREFIX_DELETE, CALLBACK_PREFIX_MAIN_MENU,
     make_edit_button, make_edit_menu_keyboard, make_main_menu_keyboard,
     make_menu_button, base_text,
 )
@@ -143,6 +144,10 @@ class ExpenseHandlers(EditHandlersMixin, InsightsHandlersMixin, MenuHandlersMixi
             return
 
         user_id = message.from_user.id if message.from_user else 0
+
+        # Menu-driven income flow owns the next 1-2 messages (description, amount).
+        if await self._handle_pending_income(message, context):
+            return
 
         mode_currency = detect_mode_change(message.text, self.currency_lookup)
         if mode_currency:
@@ -371,4 +376,76 @@ class ExpenseHandlers(EditHandlersMixin, InsightsHandlersMixin, MenuHandlersMixi
             await message.set_reaction(OK_HAND)
         except Exception:
             pass
+        return True
+
+    async def _handle_pending_income(self, message, context: ContextTypes.DEFAULT_TYPE) -> bool:
+        """Drive the menu income flow: ask description, then amount, then record. Returns True if handled."""
+        pending = context.chat_data.get("pending_income")
+        if not pending:
+            return False
+
+        if time.time() - pending.get("timestamp", 0) > PENDING_STATE_TTL:
+            del context.chat_data["pending_income"]
+            return False
+
+        bot_message_id = pending["bot_message_id"]
+        cancel_keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("חזור לתפריט", callback_data=f"{CALLBACK_PREFIX_MAIN_MENU}home")],
+        ])
+
+        async def _edit(text, keyboard):
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=message.chat_id, message_id=bot_message_id,
+                    text=text, reply_markup=keyboard,
+                )
+            except Exception:
+                logger.debug("Could not edit income message")
+
+        if pending.get("step") == "description":
+            pending["description"] = message.text.strip()
+            pending["step"] = "amount"
+            pending["timestamp"] = time.time()
+            context.chat_data["pending_income"] = pending
+            await _edit(f"➕ הכנסה: {pending['description']}\n\n💰 מה הסכום?", cancel_keyboard)
+            await safe_react(message, OK_HAND)
+            return True
+
+        # step == "amount"
+        description = pending.get("description", "")
+        try:
+            amount = float(message.text.strip())
+        except ValueError:
+            await _edit(f"➕ הכנסה: {description}\n\n❌ סכום לא תקין, שלח מספר:", cancel_keyboard)
+            return True
+
+        del context.chat_data["pending_income"]
+        user_id = message.from_user.id if message.from_user else 0
+        user_currency = self._get_user_currency(context, user_id, self.default_currency)
+        performer = performer_name(message.from_user)
+
+        row_number = None
+        try:
+            row_number = self.sheets.append_expense(
+                amount=amount, description=description, currency=user_currency,
+                kind="income", performer=performer,
+            )
+            self.sheets.update_category(row_number, OTHER_CATEGORY)
+            logger.info("Recorded income: %s %s [%s] (row %s)",
+                        amount, description, user_currency, row_number)
+            status = f"✓ הכנסה נרשמה: {description}: {amount} {user_currency} — {OTHER_CATEGORY}"
+        except Exception:
+            logger.exception("Failed to record income: %s", description)
+            status = "❌ שגיאה ברישום ההכנסה"
+
+        if row_number is not None:
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🗑 מחיקה", callback_data=f"{CALLBACK_PREFIX_DELETE}{row_number}")],
+                make_menu_button(),
+            ])
+        else:
+            keyboard = InlineKeyboardMarkup([make_menu_button()])
+
+        await _edit(status, keyboard)
+        await safe_react(message, OK_HAND)
         return True

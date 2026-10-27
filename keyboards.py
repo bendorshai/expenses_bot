@@ -104,6 +104,7 @@ def make_insights_keyboard() -> InlineKeyboardMarkup:
 
 def make_main_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ הוסף הכנסה", callback_data=f"{CALLBACK_PREFIX_MAIN_MENU}income")],
         [InlineKeyboardButton("🔍 שאל שאלה", callback_data=f"{CALLBACK_PREFIX_INSIGHTS_ASK}0")],
         [InlineKeyboardButton("💱 עדכן מצב מטבע", callback_data=f"{CALLBACK_PREFIX_MAIN_MENU}currency")],
         [InlineKeyboardButton("📋 הנחיית סיווג", callback_data=f"{CALLBACK_PREFIX_MAIN_MENU}directives")],

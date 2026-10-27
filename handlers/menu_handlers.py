@@ -40,10 +40,25 @@ class MenuHandlersMixin:
 
         context.chat_data.pop("pending_question", None)
         context.chat_data.pop("pending_edit", None)
+        context.chat_data.pop("pending_income", None)
 
         if action == "home":
             keyboard = make_main_menu_keyboard()
             await query.edit_message_text(self.WELCOME_TEXT, reply_markup=keyboard)
+
+        elif action == "income":
+            context.chat_data["pending_income"] = {
+                "step": "description",
+                "bot_message_id": query.message.message_id,
+                "timestamp": time.time(),
+            }
+            cancel_keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("חזור לתפריט", callback_data=f"{CALLBACK_PREFIX_MAIN_MENU}home")],
+            ])
+            await query.edit_message_text(
+                "➕ הוספת הכנסה\n\n✏️ מה לרשום בתיאור?",
+                reply_markup=cancel_keyboard,
+            )
 
         elif action == "currency":
             user_id = query.from_user.id if query.from_user else 0

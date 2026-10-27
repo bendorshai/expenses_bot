@@ -9,8 +9,8 @@ from categorizer import Categorizer
 from storage import MongoStorage
 from bot import create_bot, retroload
 
-VERSION = "0.11.0"
-VERSION_NOTES = "אין יותר סיווג אוטומטי — כל הוצאה נרשמת כ\"אחר\" ובהודעה עוקבת שואלים אם לסווג כ-X. נוספה עמודת \"מבצע\" (מי רשם). לחצן \"📋 תפריט\" בכל תגובה במקום הודעה מתוזמנת"
+VERSION = "0.12.0"
+VERSION_NOTES = "נוסף תיעוד הכנסות! בתפריט יש עכשיו \"➕ הוסף הכנסה\" — הבוט שואל תיאור וסכום, והשאר נרשם אוטומטית (הכנסה נכנסת לעמודת זכות)"
 CONFIG_PATH = Path(__file__).parent / "config" / "config.json"
 
 logging.basicConfig(
