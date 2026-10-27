@@ -26,13 +26,6 @@ class MenuHandlersMixin:
         "אפשר לעבור מטבע דרך תפריט 💱 עדכן מצב מטבע."
     )
 
-    async def _send_welcome(self, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Send the welcome / main-menu message to the configured chat."""
-        keyboard = make_main_menu_keyboard()
-        await context.bot.send_message(
-            chat_id=self.chat_id, text=self.WELCOME_TEXT, reply_markup=keyboard,
-        )
-
     async def handle_start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         message = update.effective_message
         if not message or message.chat_id != self.chat_id:
@@ -102,28 +95,3 @@ class MenuHandlersMixin:
                 f"הנחיות סיווג{directives_display}\n✏️ שלח הנחיה חדשה לסיווג (בטקסט חופשי):",
                 reply_markup=cancel_keyboard,
             )
-
-    # ------------------------------------------------------------------
-    # Idle welcome timer
-    # ------------------------------------------------------------------
-
-    def _schedule_welcome(self, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Cancel any pending welcome job and schedule a new one 60s from now."""
-        old_job = context.chat_data.pop("welcome_job", None)
-        if old_job is not None:
-            try:
-                old_job.schedule_removal()
-            except Exception:
-                pass
-
-        job_queue = context.application.job_queue
-        if job_queue is None:
-            return
-
-        job = job_queue.run_once(self._welcome_job_callback, when=60, chat_id=self.chat_id)
-        context.chat_data["welcome_job"] = job
-
-    async def _welcome_job_callback(self, context: ContextTypes.DEFAULT_TYPE) -> None:
-        chat_data = context.application.chat_data.get(self.chat_id, {})
-        chat_data.pop("welcome_job", None)
-        await self._send_welcome(context)

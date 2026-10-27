@@ -1,20 +1,23 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from datetime import datetime, timedelta
 
-from telegram import Update, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from sheets import SheetsClient
-from categorizer import Categorizer
+from categorizer import Categorizer, ParsedExpense, OTHER_CATEGORY
 from storage import MongoStorage
+from performers import performer_name
 from parsing import parse_date_token, detect_mode_change, build_currency_lookup, is_edit_request, israel_today
 from keyboards import (
     THUMBS_UP, OK_HAND,
-    CALLBACK_PREFIX_EDIT,
-    make_edit_button, make_edit_menu_keyboard, make_main_menu_keyboard, base_text,
+    CALLBACK_PREFIX_EDIT, CALLBACK_PREFIX_CONFIRM_CAT, CALLBACK_PREFIX_REJECT_CAT,
+    make_edit_button, make_edit_menu_keyboard, make_main_menu_keyboard,
+    make_menu_button, base_text,
 )
 from handlers.utils import PENDING_STATE_TTL, safe_react
 from handlers.edit_handlers import EditHandlersMixin
@@ -90,6 +93,28 @@ class ExpenseHandlers(EditHandlersMixin, InsightsHandlersMixin, MenuHandlersMixi
     # Helpers
     # ------------------------------------------------------------------
 
+    _AMOUNT_RE = re.compile(r"\d+(?:\.\d+)?")
+
+    @staticmethod
+    def _try_fallback_expense(text: str, currency: str) -> ParsedExpense | None:
+        """Extract a minimal expense from raw text when GPT failed to parse it.
+
+        Returns a ParsedExpense with category="אחר" if the text contains a number,
+        or None if no number is found.
+        """
+        match = ExpenseHandlers._AMOUNT_RE.search(text)
+        if not match:
+            return None
+        amount = float(match.group())
+        description = (text[:match.start()] + text[match.end():]).strip()
+        return ParsedExpense(
+            amount=amount,
+            description=description,
+            category=OTHER_CATEGORY,
+            currency=currency,
+            date=None,
+        )
+
     @staticmethod
     def _get_user_currency(context: ContextTypes.DEFAULT_TYPE, user_id: int, default: str) -> str:
         user_currencies = context.chat_data.setdefault("user_currencies", {})
@@ -153,12 +178,31 @@ class ExpenseHandlers(EditHandlersMixin, InsightsHandlersMixin, MenuHandlersMixi
             await self._answer_freetext_question(message)
             return
 
-        if result.type == "unknown" or not result.expenses:
-            return
+        expenses = result.expenses or []
+        if result.type == "unknown" or not expenses:
+            fallback = self._try_fallback_expense(message.text, user_currency)
+            if fallback is None:
+                return
+            expenses = [fallback]
 
+        ack_msg = await self._record_and_confirm(expenses, message.from_user, message, context.chat_data)
+        if ack_msg is None:
+            return
+        await safe_react(message, OK_HAND)
+
+    async def _record_and_confirm(self, expenses, from_user, reply_target, chat_data):
+        """Record each expense as "אחר" (performer tagged), acknowledge, then ask the user
+        to confirm GPT's suggested category in a following message per expense.
+
+        Shared by the live handler and the offline retroload path. ``chat_data`` is the dict
+        where per-message state is stored so the confirm/reject callbacks can find it later.
+        ``from_user`` is the Telegram sender, documented in the "מבצע" column.
+        Returns the acknowledgment message, or None if nothing was recorded.
+        """
+        performer = performer_name(from_user)
         results = []
         all_buttons: list[list] = []
-        for expense in result.expenses:
+        for expense in expenses:
             try:
                 expense_date = None
                 if expense.date:
@@ -172,40 +216,54 @@ class ExpenseHandlers(EditHandlersMixin, InsightsHandlersMixin, MenuHandlersMixi
                     description=expense.description,
                     currency=expense.currency,
                     expense_date=expense_date,
+                    performer=performer,
                 )
-                logger.info("Recorded expense: %s %s [%s] (row %d)",
-                            expense.amount, expense.description, expense.currency, row_number)
+                # Always record as "אחר"; GPT's category is only a suggestion to confirm.
+                self.sheets.update_category(row_number, OTHER_CATEGORY)
+                logger.info("Recorded as '%s': %s %s [%s] (row %d), suggestion=%s",
+                            OTHER_CATEGORY, expense.amount, expense.description,
+                            expense.currency, row_number, expense.category or "N/A")
 
-                if expense.category:
-                    self.sheets.update_category(row_number, expense.category)
-                    logger.info("Categorized '%s' -> '%s'", expense.description, expense.category)
-
-                cat_display = expense.category if expense.category else "לא זוהה"
                 results.append((row_number, expense.description, expense.amount,
-                                cat_display, expense.currency, expense.date))
+                                expense.currency, expense.date, expense.category))
                 all_buttons.append(make_edit_button(row_number, expense.description))
             except Exception:
                 logger.exception("Failed to record expense: %s", expense.description)
 
         if not results:
-            return
+            return None
 
         reply_lines = []
-        for _, description, amount, cat_display, currency, date_display in results:
-            line = f"{description}: {amount} {currency} — {cat_display}"
+        for _, description, amount, currency, date_display, _sugg in results:
+            line = f"{description}: {amount} {currency} — {OTHER_CATEGORY}"
             if date_display:
                 line += f" ({date_display})"
             reply_lines.append(line)
 
-        keyboard = InlineKeyboardMarkup(all_buttons)
-        reply_msg = await message.reply_text("\n".join(reply_lines), reply_markup=keyboard)
-        context.chat_data[f"buttons_{reply_msg.message_id}"] = all_buttons
-        await safe_react(message, OK_HAND)
+        keyboard = InlineKeyboardMarkup(all_buttons + [make_menu_button()])
+        ack_msg = await reply_target.reply_text("\n".join(reply_lines), reply_markup=keyboard)
+        chat_data[f"buttons_{ack_msg.message_id}"] = all_buttons
 
-        try:
-            self._schedule_welcome(context)
-        except Exception:
-            logger.debug("Could not schedule welcome message")
+        # Following message(s): confirm GPT's suggestion for each expense that got a real one.
+        for row_number, description, amount, currency, _date, suggestion in results:
+            if not suggestion or suggestion == OTHER_CATEGORY:
+                continue
+            confirm_keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ כן", callback_data=f"{CALLBACK_PREFIX_CONFIRM_CAT}{row_number}"),
+                InlineKeyboardButton("❌ לא", callback_data=f"{CALLBACK_PREFIX_REJECT_CAT}{row_number}"),
+            ]])
+            conf_text = f'💡 לסווג את "{description}" כ"{suggestion}"?'
+            conf_msg = await reply_target.reply_text(conf_text, reply_markup=confirm_keyboard)
+            cid = conf_msg.message_id
+            chat_data[f"editing_{cid}"] = {
+                "row_number": row_number,
+                "description": description,
+                "base_text": f"{description}: {amount} {currency}",
+            }
+            chat_data[f"catflow_{cid}"] = True
+            chat_data[f"suggest_{cid}"] = suggestion
+
+        return ack_msg
 
     async def _handle_reply_edit(self, message, context: ContextTypes.DEFAULT_TYPE) -> bool:
         """If the user replies to a bot expense message with an edit trigger word, open the edit menu."""

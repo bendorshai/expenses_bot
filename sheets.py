@@ -87,6 +87,7 @@ class SheetsClient:
         description: str,
         currency: str = "שקל",
         expense_date: date | None = None,
+        performer: str | None = None,
     ) -> int:
         """Append an expense row and return the 1-based row number it was written to."""
         ws = self._get_worksheet()
@@ -100,6 +101,8 @@ class SheetsClient:
             "תנועה": str(-amount),
             "מטבע": currency,
         }
+        if performer:
+            values["מבצע"] = performer
 
         row = self._build_row(values)
         result = ws.append_row(row, value_input_option="USER_ENTERED", table_range="A1")

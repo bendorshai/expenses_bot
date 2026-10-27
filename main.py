@@ -9,8 +9,8 @@ from categorizer import Categorizer
 from storage import MongoStorage
 from bot import create_bot, retroload
 
-VERSION = "0.9.0"
-VERSION_NOTES = "קטגוריות מוצגות לפי פופולריות (5 הראשונות), אחר כך א-ב, ואחר/לא ידוע בסוף. רענון נתונים ברקע כל 7 ימים — ללא המתנה בזמן שימוש"
+VERSION = "0.11.0"
+VERSION_NOTES = "אין יותר סיווג אוטומטי — כל הוצאה נרשמת כ\"אחר\" ובהודעה עוקבת שואלים אם לסווג כ-X. נוספה עמודת \"מבצע\" (מי רשם). לחצן \"📋 תפריט\" בכל תגובה במקום הודעה מתוזמנת"
 CONFIG_PATH = Path(__file__).parent / "config" / "config.json"
 
 logging.basicConfig(
@@ -57,6 +57,12 @@ def main():
     gs = cfg["google_sheets"]
     columns = cfg["table_columns"]
     openai_cfg = cfg["openai"]
+
+    # Performer column is enforced in code so it works regardless of the deployed config
+    # (production config comes from the CONFIG2_JSON env var, which may not include it).
+    # TODO: once CONFIG2_JSON carries "מבצע", this safety-net can be removed.
+    if "מבצע" not in columns.values():
+        columns["L"] = "מבצע"
 
     sheets_client = SheetsClient(
         credentials_file=gs["credentials_file"],

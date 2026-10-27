@@ -26,6 +26,12 @@ CALLBACK_PREFIX_CUR_MODE = "cmode_"
 CALLBACK_PREFIX_SUGGEST_DIR = "sdir_"
 CALLBACK_PREFIX_DECLINE_DIR = "ndir_"
 CALLBACK_PREFIX_MAIN_MENU = "mmenu_"
+CALLBACK_PREFIX_CONFIRM_CAT = "ccat_"
+CALLBACK_PREFIX_REJECT_CAT = "rcat_"
+
+
+def make_menu_button() -> list[InlineKeyboardButton]:
+    return [InlineKeyboardButton("📋 תפריט", callback_data=f"{CALLBACK_PREFIX_MAIN_MENU}home")]
 
 
 def make_edit_button(row_number: int, description: str) -> list[InlineKeyboardButton]:
@@ -45,6 +51,7 @@ def make_edit_menu_keyboard(row_number: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("סיווג", callback_data=f"{CALLBACK_PREFIX_EDIT_CAT}{row_number}")],
         [InlineKeyboardButton("מחיקה", callback_data=f"{CALLBACK_PREFIX_DELETE}{row_number}")],
         [InlineKeyboardButton("חזור", callback_data=f"{CALLBACK_PREFIX_BACK}")],
+        make_menu_button(),
     ])
 
 

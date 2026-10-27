@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from telegram import InlineKeyboardMarkup, Update
+from telegram import Update
 from telegram.ext import (
     Application,
     ContextTypes,
@@ -12,7 +12,7 @@ from telegram.ext import (
     filters,
 )
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from sheets import SheetsClient
 from categorizer import Categorizer
@@ -26,9 +26,9 @@ from keyboards import (
     CALLBACK_PREFIX_CUR_MODE,
     CALLBACK_PREFIX_UPDATE, CALLBACK_PREFIX_DELETE, CALLBACK_PREFIX_DIRECTIVE,
     CALLBACK_PREFIX_SUGGEST_DIR, CALLBACK_PREFIX_DECLINE_DIR,
+    CALLBACK_PREFIX_CONFIRM_CAT, CALLBACK_PREFIX_REJECT_CAT,
     CALLBACK_PREFIX_INSIGHTS_SUMMARY, CALLBACK_PREFIX_INSIGHTS_ASK,
     CALLBACK_PREFIX_BACK, CALLBACK_PREFIX_BACK_EDIT, CALLBACK_PREFIX_MAIN_MENU,
-    make_edit_button,
 )
 from handlers import ExpenseHandlers
 
@@ -102,6 +102,8 @@ async def retroload(
     today_str = israel_today().strftime("%d/%m/%Y")
     categories = sheets_client.get_categories()
     directives = sheets_client.get_directives()
+    handlers = app.bot_data.get("handlers")
+    chat_data = app._chat_data[chat_id]
     processed = 0
 
     for update in updates:
@@ -122,49 +124,13 @@ async def retroload(
             logger.info("Retroload: skipping non-expense message: %s", msg.text[:80])
             continue
 
-        results = []
-        all_buttons: list[list] = []
-        for expense in result.expenses:
-            try:
-                expense_date = None
-                if expense.date:
-                    try:
-                        expense_date = datetime.strptime(expense.date, "%d/%m/%Y").date()
-                    except ValueError:
-                        logger.warning("Retroload: invalid date from GPT: %s", expense.date)
-
-                row_number = sheets_client.append_expense(
-                    amount=expense.amount,
-                    description=expense.description,
-                    currency=expense.currency,
-                    expense_date=expense_date,
-                )
-                if expense.category:
-                    sheets_client.update_category(row_number, expense.category)
-
-                cat_display = expense.category if expense.category else "לא זוהה"
-                results.append((row_number, expense.description, expense.amount,
-                                cat_display, expense.currency, expense.date))
-                all_buttons.append(make_edit_button(row_number, expense.description))
-                logger.info("Retroload: %s %s [%s] -> row %d, category: %s",
-                            expense.amount, expense.description, expense.currency,
-                            row_number, expense.category or "N/A")
-                processed += 1
-            except Exception:
-                logger.exception("Retroload: failed to process expense: %s", expense.description)
-
-        if results:
-            reply_lines = []
-            for _, description, amount, cat_display, currency, date_display in results:
-                line = f"{description}: {amount} {currency} — {cat_display}"
-                if date_display:
-                    line += f" ({date_display})"
-                reply_lines.append(line)
-            keyboard = InlineKeyboardMarkup(all_buttons)
-            try:
-                await msg.reply_text("\n".join(reply_lines), reply_markup=keyboard)
-            except Exception:
-                logger.debug("Retroload: could not reply to message %d", msg.message_id)
+        try:
+            # Reuse the live flow: record each expense as "אחר" with a confirmation prompt.
+            ack = await handlers._record_and_confirm(result.expenses, msg.from_user, msg, chat_data)
+            if ack is not None:
+                processed += len(result.expenses)
+        except Exception:
+            logger.exception("Retroload: failed to process message %d", msg.message_id)
 
         try:
             await msg.set_reaction(OK_HAND)
@@ -215,6 +181,8 @@ def create_bot(
     app.add_handler(CallbackQueryHandler(h.handle_directive, pattern=f"^{CALLBACK_PREFIX_DIRECTIVE}"))
     app.add_handler(CallbackQueryHandler(h.handle_suggest_directive, pattern=f"^{CALLBACK_PREFIX_SUGGEST_DIR}"))
     app.add_handler(CallbackQueryHandler(h.handle_decline_directive, pattern=f"^{CALLBACK_PREFIX_DECLINE_DIR}"))
+    app.add_handler(CallbackQueryHandler(h.handle_confirm_category, pattern=f"^{CALLBACK_PREFIX_CONFIRM_CAT}"))
+    app.add_handler(CallbackQueryHandler(h.handle_reject_category, pattern=f"^{CALLBACK_PREFIX_REJECT_CAT}"))
     app.add_handler(CallbackQueryHandler(h.handle_insights_summary, pattern=f"^{CALLBACK_PREFIX_INSIGHTS_SUMMARY}"))
     app.add_handler(CallbackQueryHandler(h.handle_insights_ask, pattern=f"^{CALLBACK_PREFIX_INSIGHTS_ASK}"))
     app.add_handler(CallbackQueryHandler(h.handle_delete, pattern=f"^{CALLBACK_PREFIX_DELETE}"))
@@ -229,5 +197,8 @@ def create_bot(
         h.refresh_all_data()
 
     app.job_queue.run_repeating(_refresh_job, interval=timedelta(days=7), first=timedelta(seconds=10))
+
+    # Expose the handler instance so retroload can reuse its record-and-confirm logic.
+    app.bot_data["handlers"] = h
 
     return app
