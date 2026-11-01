@@ -48,7 +48,7 @@ class MenuHandlersMixin:
 
         elif action == "income":
             context.chat_data["pending_income"] = {
-                "step": "description",
+                "phase": "collect",
                 "bot_message_id": query.message.message_id,
                 "timestamp": time.time(),
             }
@@ -56,7 +56,9 @@ class MenuHandlersMixin:
                 [InlineKeyboardButton("חזור לתפריט", callback_data=f"{CALLBACK_PREFIX_MAIN_MENU}home")],
             ])
             await query.edit_message_text(
-                "➕ הוספת הכנסה\n\n✏️ מה לרשום בתיאור?",
+                "➕ הוספת הכנסה\n\n"
+                "✏️ כתוב בהודעה אחת: תיאור, סכום, מטבע, סיווג מועדף\n"
+                "לדוגמה: בונוס 1000 דולר (הכנסה קבועה)",
                 reply_markup=cancel_keyboard,
             )
 

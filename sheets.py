@@ -141,8 +141,27 @@ class SheetsClient:
         self.update_cell_by_name(row_number, "תיאור", description)
 
     def update_amount(self, row_number: int, amount: float) -> None:
-        self.update_cell_by_name(row_number, "חובה", str(amount))
-        self.update_cell_by_name(row_number, "תנועה", str(-amount))
+        """Update a row's amount, respecting whether it is an income or an expense.
+
+        Income rows carry the amount in זכות (credit, positive תנועה); expense rows in
+        חובה (debit, negative תנועה). We read the row first so the edit menu can stay
+        kind-agnostic and income rows are never corrupted into the debit columns.
+        """
+        data = self.get_expense_data(row_number)
+
+        def _f(v: str) -> float:
+            try:
+                return float(str(v).strip() or 0)
+            except ValueError:
+                return 0.0
+
+        is_income = _f(data.get("זכות")) > 0 and _f(data.get("חובה")) == 0
+        if is_income:
+            self.update_cell_by_name(row_number, "זכות", str(amount))
+            self.update_cell_by_name(row_number, "תנועה", str(amount))
+        else:
+            self.update_cell_by_name(row_number, "חובה", str(amount))
+            self.update_cell_by_name(row_number, "תנועה", str(-amount))
 
     def update_date(self, row_number: int, expense_date: date) -> None:
         self.update_cell_by_name(row_number, "תאריך", expense_date.strftime("%d/%m/%Y"))

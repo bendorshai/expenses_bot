@@ -28,6 +28,7 @@ from keyboards import (
     CALLBACK_PREFIX_UPDATE, CALLBACK_PREFIX_DELETE, CALLBACK_PREFIX_DIRECTIVE,
     CALLBACK_PREFIX_SUGGEST_DIR, CALLBACK_PREFIX_DECLINE_DIR,
     CALLBACK_PREFIX_CONFIRM_CAT, CALLBACK_PREFIX_REJECT_CAT,
+    CALLBACK_PREFIX_INCOME_CONFIRM, CALLBACK_PREFIX_INCOME_REJECT,
     CALLBACK_PREFIX_INSIGHTS_SUMMARY, CALLBACK_PREFIX_INSIGHTS_ASK,
     CALLBACK_PREFIX_BACK, CALLBACK_PREFIX_BACK_EDIT, CALLBACK_PREFIX_MAIN_MENU,
 )
@@ -185,6 +186,8 @@ def create_bot(
     app.add_handler(CallbackQueryHandler(h.handle_decline_directive, pattern=f"^{CALLBACK_PREFIX_DECLINE_DIR}"))
     app.add_handler(CallbackQueryHandler(h.handle_confirm_category, pattern=f"^{CALLBACK_PREFIX_CONFIRM_CAT}"))
     app.add_handler(CallbackQueryHandler(h.handle_reject_category, pattern=f"^{CALLBACK_PREFIX_REJECT_CAT}"))
+    app.add_handler(CallbackQueryHandler(h.handle_income_confirm, pattern=f"^{CALLBACK_PREFIX_INCOME_CONFIRM}"))
+    app.add_handler(CallbackQueryHandler(h.handle_income_reject, pattern=f"^{CALLBACK_PREFIX_INCOME_REJECT}"))
     app.add_handler(CallbackQueryHandler(h.handle_insights_summary, pattern=f"^{CALLBACK_PREFIX_INSIGHTS_SUMMARY}"))
     app.add_handler(CallbackQueryHandler(h.handle_insights_ask, pattern=f"^{CALLBACK_PREFIX_INSIGHTS_ASK}"))
     app.add_handler(CallbackQueryHandler(h.handle_delete, pattern=f"^{CALLBACK_PREFIX_DELETE}"))

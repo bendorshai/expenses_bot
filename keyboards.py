@@ -28,6 +28,8 @@ CALLBACK_PREFIX_DECLINE_DIR = "ndir_"
 CALLBACK_PREFIX_MAIN_MENU = "mmenu_"
 CALLBACK_PREFIX_CONFIRM_CAT = "ccat_"
 CALLBACK_PREFIX_REJECT_CAT = "rcat_"
+CALLBACK_PREFIX_INCOME_CONFIRM = "incok_"
+CALLBACK_PREFIX_INCOME_REJECT = "incno_"
 
 
 def make_menu_button() -> list[InlineKeyboardButton]:

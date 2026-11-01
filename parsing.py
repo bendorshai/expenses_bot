@@ -59,6 +59,24 @@ def is_edit_request(text: str) -> bool:
     return text.strip().lower() in {w.lower() for w in EDIT_TRIGGER_WORDS}
 
 
+_PAREN_RE = re.compile(r"\(([^()]*)\)")
+
+
+def extract_exact_category(text: str, categories: list[str]) -> str | None:
+    """Return the canonical category if *text* contains "(X)" where X, trimmed,
+    exactly matches a defined category. Otherwise None.
+
+    Deterministic, software-only categorization: when the user brackets an exact
+    category name, we assign it directly instead of asking the LLM.
+    """
+    lookup = {c.strip(): c for c in categories if c.strip()}
+    for m in _PAREN_RE.finditer(text):
+        inner = m.group(1).strip()
+        if inner in lookup:
+            return lookup[inner]
+    return None
+
+
 def israel_today() -> date:
     return datetime.now(IL_TZ).date()
 

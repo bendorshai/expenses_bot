@@ -12,11 +12,15 @@ from sheets import SheetsClient
 from categorizer import Categorizer, ParsedExpense, OTHER_CATEGORY
 from storage import MongoStorage
 from performers import performer_name
-from parsing import parse_date_token, detect_mode_change, build_currency_lookup, is_edit_request, israel_today
+from parsing import (
+    parse_date_token, detect_mode_change, build_currency_lookup, is_edit_request,
+    israel_today, extract_exact_category,
+)
 from keyboards import (
     THUMBS_UP, OK_HAND,
     CALLBACK_PREFIX_EDIT, CALLBACK_PREFIX_CONFIRM_CAT, CALLBACK_PREFIX_REJECT_CAT,
-    CALLBACK_PREFIX_DELETE, CALLBACK_PREFIX_MAIN_MENU,
+    CALLBACK_PREFIX_MAIN_MENU,
+    CALLBACK_PREFIX_INCOME_CONFIRM, CALLBACK_PREFIX_INCOME_REJECT,
     make_edit_button, make_edit_menu_keyboard, make_main_menu_keyboard,
     make_menu_button, base_text,
 )
@@ -223,14 +227,20 @@ class ExpenseHandlers(EditHandlersMixin, InsightsHandlersMixin, MenuHandlersMixi
                     expense_date=expense_date,
                     performer=performer,
                 )
-                # Always record as "אחר"; GPT's category is only a suggestion to confirm.
-                self.sheets.update_category(row_number, OTHER_CATEGORY)
+                # Deterministic, software-only categorization: a bracketed EXACT category
+                # match is applied directly (no LLM, no confirmation). Otherwise record as
+                # "אחר" and keep GPT's category as a suggestion to confirm.
+                exact_cat = extract_exact_category(expense.description, self._categories)
+                recorded_cat = exact_cat or OTHER_CATEGORY
+                self.sheets.update_category(row_number, recorded_cat)
+                # Exact matches are final — suppress the suggestion prompt.
+                suggestion = None if exact_cat else expense.category
                 logger.info("Recorded as '%s': %s %s [%s] (row %d), suggestion=%s",
-                            OTHER_CATEGORY, expense.amount, expense.description,
-                            expense.currency, row_number, expense.category or "N/A")
+                            recorded_cat, expense.amount, expense.description,
+                            expense.currency, row_number, suggestion or "N/A")
 
                 results.append((row_number, expense.description, expense.amount,
-                                expense.currency, expense.date, expense.category))
+                                expense.currency, expense.date, suggestion, recorded_cat))
                 all_buttons.append(make_edit_button(row_number, expense.description))
             except Exception:
                 logger.exception("Failed to record expense: %s", expense.description)
@@ -239,8 +249,8 @@ class ExpenseHandlers(EditHandlersMixin, InsightsHandlersMixin, MenuHandlersMixi
             return None
 
         reply_lines = []
-        for _, description, amount, currency, date_display, _sugg in results:
-            line = f"{description}: {amount} {currency} — {OTHER_CATEGORY}"
+        for _, description, amount, currency, date_display, _sugg, recorded_cat in results:
+            line = f"{description}: {amount} {currency} — {recorded_cat}"
             if date_display:
                 line += f" ({date_display})"
             reply_lines.append(line)
@@ -250,7 +260,7 @@ class ExpenseHandlers(EditHandlersMixin, InsightsHandlersMixin, MenuHandlersMixi
         chat_data[f"buttons_{ack_msg.message_id}"] = all_buttons
 
         # Following message(s): confirm GPT's suggestion for each expense that got a real one.
-        for row_number, description, amount, currency, _date, suggestion in results:
+        for row_number, description, amount, currency, _date, suggestion, _recorded in results:
             if not suggestion or suggestion == OTHER_CATEGORY:
                 continue
             confirm_keyboard = InlineKeyboardMarkup([[
@@ -378,10 +388,58 @@ class ExpenseHandlers(EditHandlersMixin, InsightsHandlersMixin, MenuHandlersMixi
             pass
         return True
 
+    def _income_confirmation_keyboard(self, row_number: int, description: str):
+        """Confirm (✅/❌) row, plus the full edit menu entry — the menu is always present."""
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ כן", callback_data=f"{CALLBACK_PREFIX_INCOME_CONFIRM}{row_number}"),
+                InlineKeyboardButton("❌ לא", callback_data=f"{CALLBACK_PREFIX_INCOME_REJECT}{row_number}"),
+            ],
+            make_edit_button(row_number, description),
+            make_menu_button(),
+        ])
+
+    async def _show_income_confirmation(self, context, chat_id, pending) -> None:
+        """Edit the income message to list all parsed fields + suggested category, asking to confirm."""
+        bot_message_id = pending["bot_message_id"]
+        row_number = pending["row_number"]
+        text = (
+            "📝 הכנסה נקלטה:\n"
+            f"תיאור: {pending['description']}\n"
+            f"סכום: {pending['amount']} {pending['currency']}\n"
+            f"סיווג מוצע: {pending['suggested_category']}\n\n"
+            "הפרטים נכונים?"
+        )
+        # So the עריכה button and reply-edit can locate the row later.
+        context.chat_data[f"editing_{bot_message_id}"] = {
+            "row_number": row_number,
+            "description": pending["description"],
+            "base_text": text,
+        }
+        context.chat_data[f"buttons_{bot_message_id}"] = [
+            make_edit_button(row_number, pending["description"])
+        ]
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id, message_id=bot_message_id,
+                text=text, reply_markup=self._income_confirmation_keyboard(row_number, pending["description"]),
+            )
+        except Exception:
+            logger.debug("Could not edit income confirmation message")
+
     async def _handle_pending_income(self, message, context: ContextTypes.DEFAULT_TYPE) -> bool:
-        """Drive the menu income flow: ask description, then amount, then record. Returns True if handled."""
+        """Drive the single-message income flow. Returns True if the message was consumed.
+
+        Phases: ``collect`` (parse the one-message input + record) and ``fix`` (apply a
+        free-text correction). The ``confirm`` phase waits on inline buttons, so a text
+        message in that phase is not consumed here.
+        """
         pending = context.chat_data.get("pending_income")
         if not pending:
+            return False
+
+        phase = pending.get("phase")
+        if phase not in ("collect", "fix"):
             return False
 
         if time.time() - pending.get("timestamp", 0) > PENDING_STATE_TTL:
@@ -402,50 +460,94 @@ class ExpenseHandlers(EditHandlersMixin, InsightsHandlersMixin, MenuHandlersMixi
             except Exception:
                 logger.debug("Could not edit income message")
 
-        if pending.get("step") == "description":
-            pending["description"] = message.text.strip()
-            pending["step"] = "amount"
-            pending["timestamp"] = time.time()
+        user_id = message.from_user.id if message.from_user else 0
+        user_currency = self._get_user_currency(context, user_id, self.default_currency)
+
+        if phase == "collect":
+            parsed = self.categorizer.parse_income(
+                text=message.text,
+                categories=self._categories,
+                currencies=self.currency_list,
+                default_currency=user_currency,
+            )
+            if parsed is None:
+                await _edit(
+                    "➕ הוספת הכנסה\n\n❌ לא הצלחתי להבין. כתוב תיאור, סכום, מטבע וסיווג מועדף:",
+                    cancel_keyboard,
+                )
+                await safe_react(message, OK_HAND)
+                return True
+
+            performer = performer_name(message.from_user)
+            try:
+                row_number = self.sheets.append_expense(
+                    amount=parsed.amount, description=parsed.description,
+                    currency=parsed.currency, kind="income", performer=performer,
+                )
+                # Record as "אחר" (like an expense); the suggested category is confirmed next.
+                self.sheets.update_category(row_number, OTHER_CATEGORY)
+                logger.info("Recorded income: %s %s [%s] (row %s), suggestion=%s",
+                            parsed.amount, parsed.description, parsed.currency,
+                            row_number, parsed.category)
+            except Exception:
+                logger.exception("Failed to record income: %s", parsed.description)
+                await _edit("❌ שגיאה ברישום ההכנסה", InlineKeyboardMarkup([make_menu_button()]))
+                del context.chat_data["pending_income"]
+                return True
+
+            pending.update({
+                "phase": "confirm",
+                "row_number": row_number,
+                "description": parsed.description,
+                "amount": parsed.amount,
+                "currency": parsed.currency,
+                "suggested_category": parsed.category,
+                "timestamp": time.time(),
+            })
             context.chat_data["pending_income"] = pending
-            await _edit(f"➕ הכנסה: {pending['description']}\n\n💰 מה הסכום?", cancel_keyboard)
+            await self._show_income_confirmation(context, message.chat_id, pending)
             await safe_react(message, OK_HAND)
             return True
 
-        # step == "amount"
-        description = pending.get("description", "")
-        try:
-            amount = float(message.text.strip())
-        except ValueError:
-            await _edit(f"➕ הכנסה: {description}\n\n❌ סכום לא תקין, שלח מספר:", cancel_keyboard)
+        # phase == "fix": apply a free-text correction via GPT, then re-confirm.
+        current = {
+            "description": pending.get("description", ""),
+            "amount": pending.get("amount", ""),
+            "currency": pending.get("currency", ""),
+            "category": pending.get("suggested_category", ""),
+        }
+        parsed = self.categorizer.parse_income(
+            text=message.text,
+            categories=self._categories,
+            currencies=self.currency_list,
+            default_currency=user_currency,
+            current=current,
+        )
+        if parsed is None:
+            await _edit("❌ לא הצלחתי להבין את העדכון. מה לעדכן? (תיאור / סכום / מטבע / סיווג):", cancel_keyboard)
+            await safe_react(message, OK_HAND)
             return True
 
-        del context.chat_data["pending_income"]
-        user_id = message.from_user.id if message.from_user else 0
-        user_currency = self._get_user_currency(context, user_id, self.default_currency)
-        performer = performer_name(message.from_user)
-
-        row_number = None
+        row_number = pending["row_number"]
         try:
-            row_number = self.sheets.append_expense(
-                amount=amount, description=description, currency=user_currency,
-                kind="income", performer=performer,
-            )
-            self.sheets.update_category(row_number, OTHER_CATEGORY)
-            logger.info("Recorded income: %s %s [%s] (row %s)",
-                        amount, description, user_currency, row_number)
-            status = f"✓ הכנסה נרשמה: {description}: {amount} {user_currency} — {OTHER_CATEGORY}"
+            if parsed.description != pending.get("description"):
+                self.sheets.update_description(row_number, parsed.description)
+            if parsed.amount != pending.get("amount"):
+                self.sheets.update_amount(row_number, parsed.amount)
+            if parsed.currency != pending.get("currency"):
+                self.sheets.update_currency(row_number, parsed.currency)
         except Exception:
-            logger.exception("Failed to record income: %s", description)
-            status = "❌ שגיאה ברישום ההכנסה"
+            logger.exception("Failed to apply income correction for row %s", row_number)
 
-        if row_number is not None:
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🗑 מחיקה", callback_data=f"{CALLBACK_PREFIX_DELETE}{row_number}")],
-                make_menu_button(),
-            ])
-        else:
-            keyboard = InlineKeyboardMarkup([make_menu_button()])
-
-        await _edit(status, keyboard)
+        pending.update({
+            "phase": "confirm",
+            "description": parsed.description,
+            "amount": parsed.amount,
+            "currency": parsed.currency,
+            "suggested_category": parsed.category,
+            "timestamp": time.time(),
+        })
+        context.chat_data["pending_income"] = pending
+        await self._show_income_confirmation(context, message.chat_id, pending)
         await safe_react(message, OK_HAND)
         return True

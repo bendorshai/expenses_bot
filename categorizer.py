@@ -27,6 +27,13 @@ class ParseResult(BaseModel):
     query: str | None = None
 
 
+class ParsedIncome(BaseModel):
+    amount: float
+    description: str
+    category: str      # mapped to an existing category, or "אחר"
+    currency: str
+
+
 class Categorizer:
     def __init__(self, api_key: str):
         self.client = OpenAI(api_key=api_key)
@@ -107,6 +114,74 @@ class Categorizer:
         except Exception:
             logger.exception("GPT parse_message failed for: %s", text[:80])
             return ParseResult(type="unknown")
+
+    def parse_income(
+        self,
+        text: str,
+        categories: list[str],
+        currencies: list[str],
+        default_currency: str,
+        current: dict | None = None,
+    ) -> ParsedIncome | None:
+        """Parse a menu-driven INCOME message using GPT.
+
+        The user types everything in one message, in the order:
+        description, amount, currency, preferred category. The preferred category is
+        mapped to the closest entry in ``categories`` (or "אחר" if none / unclear).
+        If no currency is present, ``default_currency`` is used.
+
+        ``current`` (optional) makes this a *correction* turn: it holds the current
+        field values ({description, amount, currency, category}) and ``text`` is the
+        user's change request. GPT applies the change and returns the full updated fields.
+
+        Returns a ``ParsedIncome`` or ``None`` on failure / when no amount is found.
+        """
+        categories_block = "\n".join(f"- {c}" for c in categories) if categories else "(אין קטגוריות)"
+        currencies_str = ", ".join(currencies) if currencies else default_currency
+
+        system_prompt = (
+            "אתה מערכת לתיעוד הכנסות. המשתמש בחר מהתפריט לתעד הכנסה וכותב בהודעה אחת את הפרטים.\n\n"
+            "סדר הפרטים הצפוי בהודעה: תיאור, סכום, סוג מטבע, סיווג מועדף.\n"
+            "חלק מהפרטים עשויים לחסר — חלץ מה שאפשר.\n\n"
+            "כללים:\n"
+            "- amount: הסכום המספרי של ההכנסה (חובה). אם אין מספר בהודעה — זו שגיאה.\n"
+            "- description: תיאור ההכנסה במילים של המשתמש, ללא הסכום/המטבע/הסיווג.\n"
+            f"- currency: בחר מתוך המטבעות הזמינים ({currencies_str}). "
+            f"אם לא צוין מטבע — השתמש בברירת המחדל ({default_currency}).\n"
+            "- category: מפה את הסיווג המועדף של המשתמש לקטגוריה הקרובה ביותר מתוך הרשימה. "
+            'אם לא צוין סיווג או שאין התאמה סבירה — החזר "אחר".\n\n'
+            f"קטגוריות אפשריות:\n{categories_block}\n"
+        )
+
+        if current:
+            system_prompt += (
+                "\nזהו עדכון של הכנסה קיימת. הפרטים הנוכחיים:\n"
+                f"- תיאור: {current.get('description', '')}\n"
+                f"- סכום: {current.get('amount', '')}\n"
+                f"- מטבע: {current.get('currency', '')}\n"
+                f"- סיווג: {current.get('category', '')}\n\n"
+                "המשתמש מבקש לשנות משהו (ההודעה הבאה). החל את השינוי והחזר את כל הפרטים המעודכנים, "
+                "תוך שמירה על השדות שלא התבקש לשנות.\n"
+            )
+
+        try:
+            response = self.client.beta.chat.completions.parse(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text},
+                ],
+                response_format=ParsedIncome,
+                temperature=0,
+            )
+            result = response.choices[0].message.parsed
+            if result is None:
+                logger.warning("GPT parse_income returned None for: %s", text[:80])
+                return None
+            return result
+        except Exception:
+            logger.exception("GPT parse_income failed for: %s", text[:80])
+            return None
 
     def analyze_expenses(self, question: str, expenses_csv: str) -> str:
         """Answer a user question about their expense data."""

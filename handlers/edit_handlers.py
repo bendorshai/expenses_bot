@@ -16,9 +16,11 @@ from keyboards import (
     CALLBACK_PREFIX_SUGGEST_DIR, CALLBACK_PREFIX_DECLINE_DIR,
     CALLBACK_PREFIX_BACK, CALLBACK_PREFIX_BACK_EDIT,
     CALLBACK_PREFIX_CONFIRM_CAT, CALLBACK_PREFIX_REJECT_CAT,
+    CALLBACK_PREFIX_INCOME_CONFIRM, CALLBACK_PREFIX_INCOME_REJECT,
     make_edit_menu_keyboard, make_cancel_keyboard, make_main_menu_keyboard, make_menu_button,
-    make_categories_keyboard, make_currency_keyboard, base_text,
+    make_edit_button, make_categories_keyboard, make_currency_keyboard, base_text,
 )
+from categorizer import OTHER_CATEGORY
 from handlers.utils import safe_answer
 
 logger = logging.getLogger(__name__)
@@ -307,6 +309,70 @@ class EditHandlersMixin:
         base = editing.get("base_text", base_text(query.message.text or ""))
         keyboard = make_categories_keyboard(row_number, categories, self._popular_categories)
         await query.edit_message_text(f"{base}\n\nבחר קטגוריה:", reply_markup=keyboard)
+
+    # ------------------------------------------------------------------
+    # Income confirmation / correction flow
+    # ------------------------------------------------------------------
+
+    async def handle_income_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """User confirmed the parsed income → apply the suggested category and show the edit menu."""
+        query = update.callback_query
+        await safe_answer(query)
+        row_number = int(query.data.removeprefix(CALLBACK_PREFIX_INCOME_CONFIRM))
+
+        pending = context.chat_data.pop("pending_income", {})
+        description = pending.get("description", "")
+        amount = pending.get("amount", "")
+        currency = pending.get("currency", "")
+        suggested = pending.get("suggested_category", OTHER_CATEGORY)
+
+        status = ""
+        try:
+            self.sheets.update_category(row_number, suggested)
+            logger.info("Income category confirmed: row %d -> '%s'", row_number, suggested)
+            status = f'✓ סווג כ"{suggested}"'
+        except Exception:
+            logger.exception("Failed to confirm income category for row %d", row_number)
+            status = "❌ שגיאה בעדכון הסיווג"
+
+        text = f"✓ הכנסה נרשמה: {description}: {amount} {currency} — {suggested}\n\n{status}"
+        msg_id = query.message.message_id
+        context.chat_data[f"editing_{msg_id}"] = {
+            "row_number": row_number, "description": description, "base_text": text,
+        }
+        context.chat_data[f"buttons_{msg_id}"] = [make_edit_button(row_number, description)]
+        keyboard = InlineKeyboardMarkup([make_edit_button(row_number, description), make_menu_button()])
+        await query.edit_message_text(text, reply_markup=keyboard)
+
+    async def handle_income_reject(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """User rejected the parsed income → ask (in free text) what to change; the fix loops."""
+        query = update.callback_query
+        await safe_answer(query)
+        row_number = int(query.data.removeprefix(CALLBACK_PREFIX_INCOME_REJECT))
+
+        pending = context.chat_data.get("pending_income")
+        if not pending:
+            # State lost (e.g. TTL) — fall back to the manual edit menu.
+            base = base_text(query.message.text or "")
+            await query.edit_message_text(
+                f"{base}\n\nעריכה:", reply_markup=make_edit_menu_keyboard(row_number))
+            return
+
+        pending["phase"] = "fix"
+        pending["timestamp"] = time.time()
+        context.chat_data["pending_income"] = pending
+
+        text = (
+            f"תיאור: {pending.get('description', '')}\n"
+            f"סכום: {pending.get('amount', '')} {pending.get('currency', '')}\n"
+            f"סיווג מוצע: {pending.get('suggested_category', '')}\n\n"
+            "✏️ מה לעדכן? כתוב בחופשיות (תיאור / סכום / מטבע / סיווג):"
+        )
+        keyboard = InlineKeyboardMarkup([
+            make_edit_button(row_number, pending.get("description", "")),
+            make_menu_button(),
+        ])
+        await query.edit_message_text(text, reply_markup=keyboard)
 
     async def handle_currency_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query

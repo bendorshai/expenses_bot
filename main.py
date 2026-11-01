@@ -9,8 +9,8 @@ from categorizer import Categorizer
 from storage import MongoStorage
 from bot import create_bot, retroload
 
-VERSION = "0.14.0"
-VERSION_NOTES = "נוספה פקודת /budget — בדיקת תקציב על-פי-דרישה: הבוט מתחבר למערכת התקציב, קורא את הנתונים ומחזיר דוח (חיבור, אחוזי ניצול לכל קטגוריה, ואילו התראות היו נשלחות)"
+VERSION = "0.15.0"
+VERSION_NOTES = "תיעוד הכנסה מחודש: כותבים הכל בהודעה אחת (תיאור, סכום, מטבע, סיווג מועדף), ה-GPT מנתח, ההכנסה נרשמת ומוצגת לאישור — ✅ מאשר את הסיווג, ❌ פותח תיקון חופשי. להכנסה יש תפריט עריכה מלא. בנוסף: סוגריים עם שם קטגוריה מדויק מסווגים אוטומטית ללא LLM"
 CONFIG_PATH = Path(__file__).parent / "config" / "config.json"
 
 logging.basicConfig(
