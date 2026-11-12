@@ -124,24 +124,32 @@ class SheetsClient:
                 return int(row_digits)
         return len(ws.get_all_values())
 
-    def update_cell_by_name(self, row_number: int, col_name: str, value: str) -> None:
+    def update_cell_by_name(self, row_number: int, col_name: str, value: str) -> str:
+        """Write a single named cell and return its previous value (empty if none).
+
+        Reading the old value here means every caller gets a 'from → to' signal for
+        free, without re-reading the row.
+        """
         col_letter = self._col_letter_for(col_name)
         if col_letter is None:
-            return
+            return ""
         ws = self._get_worksheet()
+        old = ws.acell(f"{col_letter}{row_number}").value or ""
         ws.update_acell(f"{col_letter}{row_number}", value)
+        return old
 
-    def update_category(self, row_number: int, category: str) -> None:
-        self.update_cell_by_name(row_number, "סיווג", category)
+    def update_category(self, row_number: int, category: str) -> str:
+        return self.update_cell_by_name(row_number, "סיווג", category)
 
-    def update_currency(self, row_number: int, currency: str) -> None:
-        self.update_cell_by_name(row_number, "מטבע", currency)
+    def update_currency(self, row_number: int, currency: str) -> str:
+        return self.update_cell_by_name(row_number, "מטבע", currency)
 
-    def update_description(self, row_number: int, description: str) -> None:
-        self.update_cell_by_name(row_number, "תיאור", description)
+    def update_description(self, row_number: int, description: str) -> str:
+        return self.update_cell_by_name(row_number, "תיאור", description)
 
-    def update_amount(self, row_number: int, amount: float) -> None:
-        """Update a row's amount, respecting whether it is an income or an expense.
+    def update_amount(self, row_number: int, amount: float) -> float:
+        """Update a row's amount, respecting whether it is an income or an expense,
+        and return the previous amount (positive magnitude).
 
         Income rows carry the amount in זכות (credit, positive תנועה); expense rows in
         חובה (debit, negative תנועה). We read the row first so the edit menu can stay
@@ -156,21 +164,27 @@ class SheetsClient:
                 return 0.0
 
         is_income = _f(data.get("זכות")) > 0 and _f(data.get("חובה")) == 0
+        old_amount = _f(data.get("זכות")) if is_income else _f(data.get("חובה"))
         if is_income:
             self.update_cell_by_name(row_number, "זכות", str(amount))
             self.update_cell_by_name(row_number, "תנועה", str(amount))
         else:
             self.update_cell_by_name(row_number, "חובה", str(amount))
             self.update_cell_by_name(row_number, "תנועה", str(-amount))
+        return old_amount
 
-    def update_date(self, row_number: int, expense_date: date) -> None:
-        self.update_cell_by_name(row_number, "תאריך", expense_date.strftime("%d/%m/%Y"))
+    def update_date(self, row_number: int, expense_date: date) -> str:
+        return self.update_cell_by_name(
+            row_number, "תאריך", expense_date.strftime("%d/%m/%Y"))
 
-    def delete_row(self, row_number: int) -> None:
-        """Clear all cells in a row (avoids shifting other rows)."""
+    def delete_row(self, row_number: int) -> dict[str, str]:
+        """Clear all cells in a row (avoids shifting other rows) and return the
+        record that was removed, so the caller can report what was deleted."""
+        data = self.get_expense_data(row_number)
         ws = self._get_worksheet()
         empty_row = [""] * self.total_cols
         ws.update(f"A{row_number}", [empty_row], value_input_option="RAW")
+        return data
 
     def get_expense_data(self, row_number: int) -> dict[str, str]:
         """Read a row and return a dict of column_name -> value."""

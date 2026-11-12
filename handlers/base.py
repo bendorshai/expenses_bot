@@ -22,9 +22,12 @@ from keyboards import (
     CALLBACK_PREFIX_MAIN_MENU,
     CALLBACK_PREFIX_INCOME_CONFIRM, CALLBACK_PREFIX_INCOME_REJECT,
     make_edit_button, make_edit_menu_keyboard, make_main_menu_keyboard,
-    make_menu_button, base_text,
+    make_menu_button, menu_only_keyboard, base_text,
 )
-from handlers.utils import PENDING_STATE_TTL, safe_react
+from handlers.utils import (
+    PENDING_STATE_TTL, safe_react,
+    EDIT_FIELD_LABELS, format_edit_notice, format_delete_notice,
+)
 from handlers.edit_handlers import EditHandlersMixin
 from handlers.insights_handlers import InsightsHandlersMixin
 from handlers.menu_handlers import MenuHandlersMixin
@@ -312,6 +315,18 @@ class ExpenseHandlers(EditHandlersMixin, InsightsHandlersMixin, MenuHandlersMixi
         await safe_react(message, OK_HAND)
         return True
 
+    @staticmethod
+    async def _send_edit_notice(reply_target, text: str) -> None:
+        """Send a standalone 'from → to' (or deletion) notice, always carrying a menu.
+
+        ``reply_target`` is the user's message (pending-edit flow) or ``query.message``
+        (callback flows) — both expose ``reply_text``.
+        """
+        try:
+            await reply_target.reply_text(text, reply_markup=menu_only_keyboard())
+        except Exception:
+            logger.debug("Could not send edit notice")
+
     async def _handle_pending_edit(self, message, context: ContextTypes.DEFAULT_TYPE) -> bool:
         """Process a pending inline-edit if one exists. Returns True if handled."""
         pending = context.chat_data.get("pending_edit")
@@ -329,22 +344,27 @@ class ExpenseHandlers(EditHandlersMixin, InsightsHandlersMixin, MenuHandlersMixi
         editing = context.chat_data.get(f"editing_{bot_message_id}", {})
 
         status = ""
+        notice = None
         try:
             if edit_type == "description":
                 new_val = message.text.strip()
-                self.sheets.update_description(row_number, new_val)
+                old_val = self.sheets.update_description(row_number, new_val)
                 editing["description"] = new_val
                 context.chat_data[f"editing_{bot_message_id}"] = editing
                 status = f"✓ תיאור עודכן: {new_val}"
+                notice = format_edit_notice(EDIT_FIELD_LABELS["description"], old_val, new_val)
             elif edit_type == "amount":
                 new_val = float(message.text.strip())
-                self.sheets.update_amount(row_number, new_val)
+                old_val = self.sheets.update_amount(row_number, new_val)
                 status = f"✓ סכום עודכן: {new_val}"
+                notice = format_edit_notice(EDIT_FIELD_LABELS["amount"], old_val, new_val)
             elif edit_type == "date":
                 parsed = parse_date_token(message.text.strip())
                 if parsed:
-                    self.sheets.update_date(row_number, parsed)
-                    status = f"✓ תאריך עודכן: {parsed.strftime('%d/%m/%Y')}"
+                    new_display = parsed.strftime("%d/%m/%Y")
+                    old_val = self.sheets.update_date(row_number, parsed)
+                    status = f"✓ תאריך עודכן: {new_display}"
+                    notice = format_edit_notice(EDIT_FIELD_LABELS["date"], old_val, new_display)
                 else:
                     status = "❌ תאריך לא תקין"
             elif edit_type == "directive":
@@ -382,6 +402,8 @@ class ExpenseHandlers(EditHandlersMixin, InsightsHandlersMixin, MenuHandlersMixi
             )
         except Exception:
             logger.debug("Could not edit bot message after pending edit")
+        if notice:
+            await self._send_edit_notice(message, notice)
         try:
             await message.set_reaction(OK_HAND)
         except Exception:

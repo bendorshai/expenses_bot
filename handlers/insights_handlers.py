@@ -112,7 +112,8 @@ class InsightsHandlersMixin:
                 await query.edit_message_text(text, reply_markup=keyboard)
         except Exception:
             logger.exception("Failed to build monthly summary")
-            await query.edit_message_text("❌ שגיאה בטעינת הנתונים")
+            await query.edit_message_text(
+                "❌ שגיאה בטעינת הנתונים", reply_markup=make_insights_keyboard())
 
     async def handle_insights_ask(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query

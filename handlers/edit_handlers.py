@@ -18,10 +18,13 @@ from keyboards import (
     CALLBACK_PREFIX_CONFIRM_CAT, CALLBACK_PREFIX_REJECT_CAT,
     CALLBACK_PREFIX_INCOME_CONFIRM, CALLBACK_PREFIX_INCOME_REJECT,
     make_edit_menu_keyboard, make_cancel_keyboard, make_main_menu_keyboard, make_menu_button,
-    make_edit_button, make_categories_keyboard, make_currency_keyboard, base_text,
+    menu_only_keyboard, make_edit_button, make_categories_keyboard, make_currency_keyboard,
+    base_text,
 )
 from categorizer import OTHER_CATEGORY
-from handlers.utils import safe_answer
+from handlers.utils import (
+    safe_answer, EDIT_FIELD_LABELS, format_edit_notice, format_delete_notice,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +107,8 @@ class EditHandlersMixin:
         row_number = int(query.data.removeprefix(CALLBACK_PREFIX_EDIT_CAT))
         categories = self._categories
         if not categories:
-            await query.edit_message_text("אין קטגוריות מוגדרות בגיליון")
+            await query.edit_message_text(
+                "אין קטגוריות מוגדרות בגיליון", reply_markup=menu_only_keyboard())
             return
         keyboard = make_categories_keyboard(row_number, categories, self._popular_categories)
         base = base_text(query.message.text or "")
@@ -151,7 +155,8 @@ class EditHandlersMixin:
         row_number = int(query.data.removeprefix(CALLBACK_PREFIX_UPDATE))
         categories = self._categories
         if not categories:
-            await query.edit_message_text("אין קטגוריות מוגדרות בגיליון")
+            await query.edit_message_text(
+                "אין קטגוריות מוגדרות בגיליון", reply_markup=menu_only_keyboard())
             return
 
         keyboard = make_categories_keyboard(row_number, categories, self._popular_categories)
@@ -167,8 +172,12 @@ class EditHandlersMixin:
         row_number = int(row_str)
 
         try:
-            self.sheets.update_category(row_number, category)
+            old_category = self.sheets.update_category(row_number, category)
             logger.info("Category update: row %d -> '%s'", row_number, category)
+            await self._send_edit_notice(
+                query.message,
+                format_edit_notice(EDIT_FIELD_LABELS["category"], old_category, category),
+            )
 
             editing = context.chat_data.get(f"editing_{query.message.message_id}", {})
             description = editing.get("description", "")
@@ -191,7 +200,8 @@ class EditHandlersMixin:
             )
         except Exception:
             logger.exception("Failed to update category for row %d", row_number)
-            await query.edit_message_text("שגיאה בעדכון הסיווג")
+            await query.edit_message_text(
+                "שגיאה בעדכון הסיווג", reply_markup=menu_only_keyboard())
 
     async def handle_suggest_directive(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -392,8 +402,12 @@ class EditHandlersMixin:
         row_number = int(row_str)
 
         try:
-            self.sheets.update_currency(row_number, currency)
+            old_currency = self.sheets.update_currency(row_number, currency)
             logger.info("Currency update: row %d -> '%s'", row_number, currency)
+            await self._send_edit_notice(
+                query.message,
+                format_edit_notice(EDIT_FIELD_LABELS["currency"], old_currency, currency),
+            )
 
             editing = context.chat_data.get(f"editing_{query.message.message_id}", {})
             description = editing.get("description", "")
@@ -422,7 +436,8 @@ class EditHandlersMixin:
                 )
         except Exception:
             logger.exception("Failed to update currency for row %d", row_number)
-            await query.edit_message_text("שגיאה בעדכון המטבע")
+            await query.edit_message_text(
+                "שגיאה בעדכון המטבע", reply_markup=menu_only_keyboard())
 
     async def handle_currency_mode_switch(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -433,8 +448,14 @@ class EditHandlersMixin:
         row_number = int(row_str)
 
         user_id = query.from_user.id if query.from_user else 0
+        old_mode = self._get_user_currency(context, user_id, self.default_currency)
         saved = self._set_user_currency(context, user_id, currency)
         logger.info("Currency mode switched to '%s' for user %d", currency, user_id)
+        if currency != old_mode:
+            await self._send_edit_notice(
+                query.message,
+                format_edit_notice(EDIT_FIELD_LABELS["currency_mode"], old_mode, currency),
+            )
 
         db_status = "✅ נשמר במסד הנתונים" if saved else "⚠️ לא הצלחתי לשמור במסד הנתונים"
         editing = context.chat_data.get(f"editing_{query.message.message_id}", {})
@@ -456,13 +477,29 @@ class EditHandlersMixin:
         await safe_answer(query)
         row_number = int(query.data.removeprefix(CALLBACK_PREFIX_DELETE))
         try:
-            self.sheets.delete_row(row_number)
+            record = self.sheets.delete_row(row_number)
             logger.info("Deleted row %d", row_number)
             base = base_text(query.message.text or "")
-            await query.edit_message_text(f"{base}\n\n✓ נמחק")
+            await query.edit_message_text(
+                f"{base}\n\n✓ נמחק", reply_markup=menu_only_keyboard())
+
+            def _nonzero(v) -> bool:
+                try:
+                    return float(str(v).strip() or 0) != 0
+                except ValueError:
+                    return False
+
+            credit = record.get("זכות", "")
+            debit = record.get("חובה", "")
+            amount = credit if _nonzero(credit) else (debit if _nonzero(debit) else "")
+            await self._send_edit_notice(
+                query.message,
+                format_delete_notice(record.get("תיאור", ""), amount, record.get("מטבע", "")),
+            )
         except Exception:
             logger.exception("Failed to delete row %d", row_number)
-            await query.edit_message_text("שגיאה במחיקה")
+            await query.edit_message_text(
+                "שגיאה במחיקה", reply_markup=menu_only_keyboard())
 
     async def handle_back(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query

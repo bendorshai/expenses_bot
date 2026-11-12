@@ -36,6 +36,11 @@ def make_menu_button() -> list[InlineKeyboardButton]:
     return [InlineKeyboardButton("📋 תפריט", callback_data=f"{CALLBACK_PREFIX_MAIN_MENU}home")]
 
 
+def menu_only_keyboard() -> InlineKeyboardMarkup:
+    """A single '📋 תפריט' button — the minimum every terminal message must carry."""
+    return InlineKeyboardMarkup([make_menu_button()])
+
+
 def make_edit_button(row_number: int, description: str) -> list[InlineKeyboardButton]:
     return [InlineKeyboardButton(f"עריכה — {description}", callback_data=f"{CALLBACK_PREFIX_EDIT}{row_number}")]
 

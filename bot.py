@@ -31,6 +31,7 @@ from keyboards import (
     CALLBACK_PREFIX_INCOME_CONFIRM, CALLBACK_PREFIX_INCOME_REJECT,
     CALLBACK_PREFIX_INSIGHTS_SUMMARY, CALLBACK_PREFIX_INSIGHTS_ASK,
     CALLBACK_PREFIX_BACK, CALLBACK_PREFIX_BACK_EDIT, CALLBACK_PREFIX_MAIN_MENU,
+    make_main_menu_keyboard, menu_only_keyboard,
 )
 from handlers import ExpenseHandlers
 
@@ -69,7 +70,8 @@ def _make_error_handler(mongo_storage: MongoStorage):
 
         if isinstance(update, Update) and update.effective_message:
             try:
-                await update.effective_message.reply_text("❌ שגיאה פנימית. נסה שוב.")
+                await update.effective_message.reply_text(
+                    "❌ שגיאה פנימית. נסה שוב.", reply_markup=make_main_menu_keyboard())
             except Exception:
                 pass
 
@@ -226,7 +228,7 @@ def create_bot(
                 return
             # On-demand proof the bot can reach card_to_sheet and parse its JSON.
             report = alerter.build_diagnostic()
-            await message.reply_text(report)
+            await message.reply_text(report, reply_markup=menu_only_keyboard())
 
         app.add_handler(CommandHandler("budget", _budget_cmd))
         logger.info("Budget alerts enabled — daily check at 09:00 Israel time; /budget for on-demand check")

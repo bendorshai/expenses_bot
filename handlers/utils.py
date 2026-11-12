@@ -7,6 +7,37 @@ logger = logging.getLogger(__name__)
 MAX_TG_LENGTH = 4096
 PENDING_STATE_TTL = 300  # 5 minutes
 
+# Hebrew field labels for edit notices, keyed by the internal edit type.
+EDIT_FIELD_LABELS = {
+    "amount": "סכום",
+    "date": "תאריך",
+    "description": "תיאור",
+    "category": "סיווג",
+    "currency": "מטבע",
+    "currency_mode": "מצב מטבע",
+}
+
+
+def _fmt_value(value) -> str:
+    """Render an old/new value for a notice, using an em dash for empty/None."""
+    if value is None:
+        return "—"
+    text = str(value).strip()
+    return text if text else "—"
+
+
+def format_edit_notice(label_he: str, old, new) -> str:
+    """A standalone 'from → to' edit notice, e.g. ✏️ סכום שונה: מ-«10» ל-«20»."""
+    return f"✏️ {label_he} שונה: מ-«{_fmt_value(old)}» ל-«{_fmt_value(new)}»"
+
+
+def format_delete_notice(description, amount=None, currency: str = "") -> str:
+    """A standalone deletion notice, e.g. 🗑️ נמחק: חלב — 15 שקל."""
+    desc = _fmt_value(description) if description else "רשומה"
+    amt = f" — {_fmt_value(amount)}" if amount not in (None, "") else ""
+    cur = f" {currency}" if amt and currency else ""
+    return f"🗑️ נמחק: {desc}{amt}{cur}"
+
 
 async def safe_answer(query, text: str = "") -> None:
     """Acknowledge a callback query, silently ignoring failures."""
